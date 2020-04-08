@@ -238,6 +238,8 @@ devicelist() {
 	local DEVICES="/dev/cdroms/* /dev/ide/cd/* /dev/sr*"
 	# USB Keychain/Storage
 	DEVICES="${DEVICES} /dev/sd*"
+	# NVME devices
+	#DEVICES="${DEVICES} /dev/nvme*"
 	# IDE devices
 	DEVICES="${DEVICES} /dev/hd*"
 	# virtio devices
@@ -1800,14 +1802,20 @@ openLUKS() {
 			local isLuks=
 			if [ -n ${LUKS_HEADER} ]
 			then
-				local REAL_LUKS_HEADERDEV="${LUKS_HEADERDEV}"
+				# Handle header -> same as for key and keydevice, but before them
+				# for isLuks-checking with detached header
 				# check for header device found
+				# wait for header device to be plugged in
+				# mount header device
+				# gtg!
+				local REAL_LUKS_HEADERDEV="${LUKS_HEADERDEV}"
 				if [  ]
 				then
 					REAL_LUKS_KEYDEV=$(find_real_device "${LUKS_KEYDEV}")
 				fi
+				
 				cryptsetup_options="${cryptsetup_options} --header ${LUKS_HEADERDEV}${LUKS_HEADER}"
-				# if header is detached isLuks check will be true with --header /path/to/header.img
+				# if header is detached isLuks check will be true when --header /path/to/header.img arg is provided
 				if ! run cryptsetup isLuks ${LUKS_DEVICE} --header ${LUKS_HEADERDEV}${LUKS_HEADER}
 				then
 					isLuks=0
@@ -1834,7 +1842,7 @@ openLUKS() {
 					good_msg "Enabling TRIM support for ${LUKS_NAME} ..." ${CRYPT_SILENT}
 					cryptsetup_options="${cryptsetup_options} --allow-discards"
 				fi
-
+				
 				# Handle keys
 				if [ -n "${LUKS_KEY}" ]
 				then

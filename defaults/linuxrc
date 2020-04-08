@@ -250,6 +250,12 @@ do
 			CRYPT_SWAP=${x#*=}
 			USE_CRYPTSETUP=1
 		;;
+		root_header=*)
+			CRYPT_ROOT_HEADER=${x#*=}
+		;;
+		root_headerdev=*)
+			CRYPT_ROOT_HEADERDEV=${x#*=}
+		;;
 		root_key=*)
 			CRYPT_ROOT_KEY=${x#*=}
 		;;

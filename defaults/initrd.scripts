@@ -238,6 +238,8 @@ devicelist() {
 	local DEVICES="/dev/cdroms/* /dev/ide/cd/* /dev/sr*"
 	# USB Keychain/Storage
 	DEVICES="${DEVICES} /dev/sd*"
+	# NVME devices
+	#DEVICES="${DEVICES} /dev/nvme*"
 	# IDE devices
 	DEVICES="${DEVICES} /dev/hd*"
 	# virtio devices
@@ -355,6 +357,14 @@ bootstrapKey() {
 	eval local keyloc='"${CRYPT_'${1}'_KEY}"'
 
 	findmediamount "key" "${keyloc}" "CRYPT_${1}_KEYDEV" "/mnt/key" ${KEYDEVS}
+}
+
+bootstrapHeader() {
+	# $1 = ROOT
+	local HEADERDEVS=$(devicelist)
+	eval local headerloc='"${CRYPT_'${1}'_HEADER}"'
+
+	findmediamount "header" "${headerloc}" "CRYPT_${1}_HEADERDEV" "/mnt/header" ${HEADERDEVS}
 }
 
 cache_cd_contents() {
@@ -1749,9 +1759,10 @@ openLUKS() {
 
 	eval local LUKS_DEVICE='"${CRYPT_'${TYPE}'}"' LUKS_NAME="$1" LUKS_KEY='"${CRYPT_'${TYPE}'_KEY}"'
 	eval local LUKS_KEYDEV='"${CRYPT_'${TYPE}'_KEYDEV}"' LUKS_TRIM='"${CRYPT_'${TYPE}'_TRIM}"'
+	local LUKS_HEADERDEV="${CRYPT_ROOT_HEADERDEV}" LUKS_HEADER="${CRYPT_ROOT_HEADER}"
 	eval local OPENED_LOCKFILE='"${CRYPT_'${TYPE}'_OPENED_LOCKFILE}"'
-	local DEV_ERROR=0 KEY_ERROR=0 KEYDEV_ERROR=0
-	local mntkey="/mnt/key/" crypt_filter_ret=
+	local DEV_ERROR=0 KEY_ERROR=0 KEYDEV_ERROR=0 HEADER_ERROR=0 HEADERDEV_ERROR=0
+	local mntkey="/mnt/key/" mntheader="/mnt/luksheader/" crypt_filter_ret=
 
 	while true
 	do
@@ -1763,7 +1774,7 @@ openLUKS() {
 			good_msg "The LUKS device ${LUKS_DEVICE} meanwhile was opened by someone else."
 			break
 		# if crypt_silent=1 and some error occurs, enter shell quietly
-		elif [ \( ${CRYPT_SILENT} -eq 1 \) -a \( \( \( ${DEV_ERROR} -eq 1 \) -o \( ${KEY_ERROR} -eq 1 \) \) -o \( ${KEYDEV_ERROR} -eq 1 \) \) ]
+		elif [ \( ${CRYPT_SILENT} -eq 1 \) -a \( \( \( ${DEV_ERROR} -eq 1 \) -o \( ${KEY_ERROR} -eq 1 \) \) -o \( ${KEYDEV_ERROR} -eq 1 \) -o \( ${HEADER_ERROR} -eq 1 \) -o \( ${HEADERDEV_ERROR} -eq 1 \) \) ]
 		then
 			run_shell
 		elif [ ${DEV_ERROR} -eq 1 ]
@@ -1778,6 +1789,14 @@ openLUKS() {
 		then
 			prompt_user "LUKS_KEYDEV" "${LUKS_NAME} key device"
 			KEYDEV_ERROR=0
+		elif [ ${HEADER_ERROR} -eq 1 ]
+		then
+			prompt_user "LUKS_HEADER" "${LUKS_NAME} header"
+			HEADER_ERROR=0
+		elif [ ${HEADEREV_ERROR} -eq 1 ]
+		then
+			prompt_user "LUKS_HEADERDEV" "${LUKS_NAME} header device"
+			HEADERDEV_ERROR=0
 		else
 			LUKS_DEVICE=$(find_real_device "${LUKS_DEVICE}")
 			if [ -z "${LUKS_DEVICE}" ]
@@ -1786,9 +1805,96 @@ openLUKS() {
 				DEV_ERROR=1
 				continue
 			fi
-
+			
 			setup_md_device ${LUKS_DEVICE}
-			if ! run cryptsetup isLuks ${LUKS_DEVICE}
+			local isLuks=
+			if [ -n "${LUKS_HEADER}" ]
+			then
+				# Handle header -> same as for key and keydevice, but before them
+				# for isLuks-checking with detached header
+				# LUKS_KEYDEV maybe used to store the header besides the keyfile too
+				local REAL_LUKS_HEADERDEV="${LUKS_HEADERDEV}"
+				if [ ! -e "${mntheader}${LUKS_HEADER}" ]
+				then
+					REAL_LUKS_HEADERDEV=$(find_real_device "${LUKS_HEADERDEV}")
+					if [ -b "${REAL_LUKS_HEADERDEV}" ]
+					then good_msg "Using key device ${REAL_LUKS_HEADERDEV}." ${CRYPT_SILENT}
+					else
+						good_msg "Please insert removable device ${LUKS_HEADERDEV} for ${LUKS_NAME}" ${CRYPT_SILENT}
+						# abort after 10 secs
+						local count=10
+						while [ ${count} -gt 0 ]
+						do
+							count=$((count-1))
+							sleep 1
+							REAL_LUKS_HEADERDEV=$(find_real_device "${LUKS_HEADERDEV}")
+							if [ -b "${REAL_LUKS_HEADERDEV}" ]
+							then
+								good_msg "Removable device ${REAL_LUKS_HEADERDEV} detected." ${CRYPT_SILENT}
+								break
+							fi
+						done
+						if [ ! -b "${REAL_LUKS_HEADERDEV}" ]
+						then
+							eval CRYPT_ROOT_HEADER=${LUKS_HEADER}
+							bootstrapHeader ROOT
+							eval LUKS_HEADERDEV='"${CRYPT_ROOT_HEADERDEV}"'
+							REAL_LUKS_HEADERDEV=$(find_real_device "${LUKS_HEADERDEV}")
+							if [ ! -b "${REAL_LUKS_HEADERDEV}" ]
+							then
+								HEADERDEV_ERROR=1
+								bad_msg "Removable device ${LUKS_HEADERDEV} not found." ${CRYPT_SILENT}
+								continue
+							fi
+							# continue otherwise will mount headerdev which is mounted by bootstrap
+							continue
+						fi
+					fi
+
+					# At this point a device was recognized, now let's see if the header is there
+					[ ! -d "${mntheader}" ] && mkdir -p "${mntheader}" >/dev/null 2>&1
+
+					if ! run mount -n -o ro ${REAL_LUKS_HEADERDEV} ${mntheader} >/dev/null 2>&1
+					then
+						HEADERDEV_ERROR=1
+						bad_msg "Mounting of device ${REAL_LUKS_HEADERDEV} failed." ${CRYPT_SILENT}
+						continue
+					else
+						good_msg "Removable device ${REAL_LUKS_HEADERDEV} mounted." ${CRYPT_SILENT}
+						sleep 2
+						# headerfile exists?
+						if [ ! -e "${mntheader}${LUKS_HEADER}" ]
+						then
+							run umount -n "${mntheader}" >/dev/null 2>&1
+							HEADER_ERROR=1
+							HEADERDEV_ERROR=1
+							bad_msg "Header ${LUKS_HEADER} on device ${REAL_LUKS_HEADERDEV} not found." ${CRYPT_SILENT}
+							continue
+						fi
+					fi
+				fi
+				# At this point a candidate header exists (either mounted before or not)
+				good_msg "${LUKS_HEADER} on device ${REAL_LUKS_HEADERDEV} found" ${CRYPT_SILENT}
+
+				cryptsetup_options="${cryptsetup_options} --header ${mntheader}${LUKS_HEADER}"
+				
+				# if header is detached isLuks check will be true when --header /path/to/header.img arg is provided
+				if ! run cryptsetup isLuks ${LUKS_DEVICE} --header ${mntheader}${LUKS_HEADER}
+				then
+					isLuks=0
+				else
+					isLuks=1
+				fi
+			else
+				if ! run cryptsetup isLuks ${LUKS_DEVICE}
+				then
+					isLuks=0
+				else
+					isLuks=1
+				fi
+			fi
+			
+			if [ ${isLuks} -eq 0 ]
 			then
 				bad_msg "The LUKS device ${LUKS_DEVICE} does not contain a LUKS header" ${CRYPT_SILENT}
 				DEV_ERROR=1
@@ -1799,7 +1905,7 @@ openLUKS() {
 					good_msg "Enabling TRIM support for ${LUKS_NAME} ..." ${CRYPT_SILENT}
 					cryptsetup_options="${cryptsetup_options} --allow-discards"
 				fi
-
+				
 				# Handle keys
 				if [ -n "${LUKS_KEY}" ]
 				then
@@ -1858,7 +1964,7 @@ openLUKS() {
 								run umount -n "${mntkey}" >/dev/null 2>&1
 								KEY_ERROR=1
 								KEYDEV_ERROR=1
-								bad_msg "Key {LUKS_KEY} on device ${REAL_LUKS_KEYDEV} not found." ${CRYPT_SILENT}
+								bad_msg "Key ${LUKS_KEY} on device ${REAL_LUKS_KEYDEV} not found." ${CRYPT_SILENT}
 								continue
 							fi
 						fi

@@ -1749,8 +1749,9 @@ openLUKS() {
 
 	eval local LUKS_DEVICE='"${CRYPT_'${TYPE}'}"' LUKS_NAME="$1" LUKS_KEY='"${CRYPT_'${TYPE}'_KEY}"'
 	eval local LUKS_KEYDEV='"${CRYPT_'${TYPE}'_KEYDEV}"' LUKS_TRIM='"${CRYPT_'${TYPE}'_TRIM}"'
+	eval local LUKS_HEADERDEV="${CRYPT_ROOT_HEADERDEV}" LUKS_HEADER="${CRYPT_ROOT_HEADER}
 	eval local OPENED_LOCKFILE='"${CRYPT_'${TYPE}'_OPENED_LOCKFILE}"'
-	local DEV_ERROR=0 KEY_ERROR=0 KEYDEV_ERROR=0
+	local DEV_ERROR=0 KEY_ERROR=0 KEYDEV_ERROR=0 HEADER_ERROR=0 HEADERDEV_ERROR=0
 	local mntkey="/mnt/key/" crypt_filter_ret=
 
 	while true
@@ -1763,7 +1764,7 @@ openLUKS() {
 			good_msg "The LUKS device ${LUKS_DEVICE} meanwhile was opened by someone else."
 			break
 		# if crypt_silent=1 and some error occurs, enter shell quietly
-		elif [ \( ${CRYPT_SILENT} -eq 1 \) -a \( \( \( ${DEV_ERROR} -eq 1 \) -o \( ${KEY_ERROR} -eq 1 \) \) -o \( ${KEYDEV_ERROR} -eq 1 \) \) ]
+		elif [ \( ${CRYPT_SILENT} -eq 1 \) -a \( \( \( ${DEV_ERROR} -eq 1 \) -o \( ${KEY_ERROR} -eq 1 \) \) -o \( ${KEYDEV_ERROR} -eq 1 \) -o \( ${HEADER_ERROR} -eq 1 \) -o \( ${HEADERDEV_ERROR} -eq 1 \) \) ]
 		then
 			run_shell
 		elif [ ${DEV_ERROR} -eq 1 ]
@@ -1778,6 +1779,14 @@ openLUKS() {
 		then
 			prompt_user "LUKS_KEYDEV" "${LUKS_NAME} key device"
 			KEYDEV_ERROR=0
+		elif [ ${HEADER_ERROR} -eq 1 ]
+		then
+			prompt_user "LUKS_HEADER" "${LUKS_NAME} header"
+			HEADER_ERROR=0
+		elif [ ${HEADEREV_ERROR} -eq 1 ]
+		then
+			prompt_user "LUKS_HEADERDEV" "${LUKS_NAME} header device"
+			HEADERDEV_ERROR=0
 		else
 			LUKS_DEVICE=$(find_real_device "${LUKS_DEVICE}")
 			if [ -z "${LUKS_DEVICE}" ]
@@ -1788,7 +1797,33 @@ openLUKS() {
 			fi
 
 			setup_md_device ${LUKS_DEVICE}
-			if ! run cryptsetup isLuks ${LUKS_DEVICE}
+			local isLuks=
+			if [ -n ${LUKS_HEADER} ]
+			then
+				local REAL_LUKS_HEADERDEV="${LUKS_HEADERDEV}"
+				# check for header device found
+				if [  ]
+				then
+					REAL_LUKS_KEYDEV=$(find_real_device "${LUKS_KEYDEV}")
+				fi
+				cryptsetup_options="${cryptsetup_options} --header ${LUKS_HEADERDEV}${LUKS_HEADER}"
+				# if header is detached isLuks check will be true with --header /path/to/header.img
+				if ! run cryptsetup isLuks ${LUKS_DEVICE} --header ${LUKS_HEADERDEV}${LUKS_HEADER}
+				then
+					isLuks=0
+				else
+					isLuks=1
+				fi
+			else
+				if ! run cryptsetup isLuks ${LUKS_DEVICE}
+				then
+					isLuks=0
+				else
+					isLuks=1
+				fi
+			fi
+			
+			if ! isLuks
 			then
 				bad_msg "The LUKS device ${LUKS_DEVICE} does not contain a LUKS header" ${CRYPT_SILENT}
 				DEV_ERROR=1

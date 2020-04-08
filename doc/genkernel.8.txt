@@ -645,6 +645,16 @@ recognized by the kernel itself.
     root_key.   If unset while using root_key, it will automatically
     look for the device in every boot.
 
+*root_header*=<...>::
+    In case your root is encrypted with a detached LUKS header,
+    you can use a device like a usb pen to store the header.
+    This value should be the header path relative to the mount point.
+
+*root_headerdev*=<...>::
+    If necessary provide the name of the device that carries the
+    detached header. If unset while using root_header, it will
+    automatically look for the device in every boot.
+
 *root_trim*=(yes|no)::
     Enables TRIM support for a LUKS-based root device.  Only useful
     with SSD setups.  Have a look at 'https://en.wikipedia.org/wiki/TRIM'

@@ -1805,7 +1805,10 @@ openLUKS() {
 				DEV_ERROR=1
 				continue
 			fi
-
+			good_msg "LuksDEV ${LUKS_DEVICE}"
+			good_msg "Luks name ${LUKS_NAME}"
+			good_msg "HeaderDEV ${LUKS_HEADERDEV}"
+			good_msg "Luks header ${LUKS_HEADER}"
 			setup_md_device ${LUKS_DEVICE}
 			local isLuks=
 			if [ -n "${LUKS_HEADER}" ]

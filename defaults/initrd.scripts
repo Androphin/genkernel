@@ -1759,7 +1759,7 @@ openLUKS() {
 
 	eval local LUKS_DEVICE='"${CRYPT_'${TYPE}'}"' LUKS_NAME="$1" LUKS_KEY='"${CRYPT_'${TYPE}'_KEY}"'
 	eval local LUKS_KEYDEV='"${CRYPT_'${TYPE}'_KEYDEV}"' LUKS_TRIM='"${CRYPT_'${TYPE}'_TRIM}"'
-	eval local LUKS_HEADERDEV="${CRYPT_ROOT_HEADERDEV}" LUKS_HEADER="${CRYPT_ROOT_HEADER}"
+	local LUKS_HEADERDEV="${CRYPT_ROOT_HEADERDEV}" LUKS_HEADER="${CRYPT_ROOT_HEADER}"
 	eval local OPENED_LOCKFILE='"${CRYPT_'${TYPE}'_OPENED_LOCKFILE}"'
 	local DEV_ERROR=0 KEY_ERROR=0 KEYDEV_ERROR=0 HEADER_ERROR=0 HEADERDEV_ERROR=0
 	local mntkey="/mnt/key/" mntheader="/mnt/luksheader/" crypt_filter_ret=
@@ -1894,7 +1894,7 @@ openLUKS() {
 				fi
 			fi
 			
-			if ! isLuks
+			if [ ${isLuks} -eq 0 ]
 			then
 				bad_msg "The LUKS device ${LUKS_DEVICE} does not contain a LUKS header" ${CRYPT_SILENT}
 				DEV_ERROR=1

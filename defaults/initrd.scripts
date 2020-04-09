@@ -1812,10 +1812,7 @@ openLUKS() {
 			then
 				# Handle header -> same as for key and keydevice, but before them
 				# for isLuks-checking with detached header
-				# check for header device found
-				# wait for header device to be plugged in
-				# mount header device
-				# gtg!
+				# LUKS_KEYDEV maybe used to store the header besides the keyfile too
 				local REAL_LUKS_HEADERDEV="${LUKS_HEADERDEV}"
 				if [ ! -e "${mntheader}${LUKS_HEADER}" ]
 				then

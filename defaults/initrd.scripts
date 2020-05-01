@@ -364,7 +364,7 @@ bootstrapHeader() {
 	local HEADERDEVS=$(devicelist)
 	eval local headerloc='"${CRYPT_'${1}'_HEADER}"'
 
-	findmediamount "header" "${headerloc}" "CRYPT_${1}_HEADERDEV" "/mnt/header" ${HEADERDEVS}
+	findmediamount "header" "${headerloc}" "CRYPT_${1}_HEADERDEV" "/mnt/luksheader" ${HEADERDEVS}
 }
 
 cache_cd_contents() {
@@ -2016,8 +2016,13 @@ openLUKS() {
 	then
 		run umount "${mntkey}" >/dev/null 2>&1
 	fi
+	if run mountpoint "${mntheader}" >/dev/null 2>&1
+	then
+		run umount "${mntheader}" >/dev/null 2>&1
+	fi
 
 	[ -d "${mntkey}" ] && run rmdir -p "${mntkey}" >/dev/null 2>&1
+	[ -d "${mntheader}" ] && run rmdir -p "${mntheader}" >/dev/null 2>&1
 }
 
 iface_name() {

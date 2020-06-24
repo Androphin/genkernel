@@ -1,8 +1,11 @@
 #!/bin/sh
 
+# shellcheck source=initrd.defaults
 . /etc/initrd.defaults
+# shellche2ck source=initrd.scripts
 . /etc/initrd.scripts
 
+# shellcheck source=/dev/null
 [ -e /etc/initrd.splash ] && . /etc/initrd.splash
 
 # Basic /dev content, we need it as fast as possible.
@@ -125,7 +128,6 @@ do
 		;;
 		dozfs*)
 			USE_ZFS=1
-			export ZPOOL_IMPORT_UDEV_TIMEOUT_MS=0
 
 			case "${x#*=}" in
 				*force*)
@@ -1136,6 +1138,7 @@ FSTAB
 	then
 		if [ -e "${CDROOT_PATH}/add" ]
 		then
+				# shellcheck disable=SC2045
 				for targz in $(ls ${CDROOT_PATH}/add/*.tar.gz)
 				do
 					tarname=$(basename ${targz})
@@ -1191,6 +1194,7 @@ FSTAB
 					if [ -e "/${NEW_ROOT}/${directory}" ]
 					then
 						# It does exist, link all the individual files
+						# shellcheck disable=SC2045
 						for file in $(ls /${NEW_ROOT}/${FS_LOCATION}/${directory})
 						do
 							if [ ! -d "/${NEW_ROOT}/${FS_LOCATION}/${directory}/${file}" ] && [ ! -e "${NEW_ROOT}/${directory}/${file}" ]

@@ -473,6 +473,12 @@ aufs_insert_dir() {
 	fi
 }
 
+udevsettle() {
+	local timeout=${1-${GK_UDEV_TIMEOUT}}
+
+	run udevadm settle --timeout=${timeout}
+}
+
 # Insert all modules found in $1, usually $CDROOT_PATH
 # added to allow users to add their own apps.
 union_insert_modules() {
@@ -728,7 +734,7 @@ setup_aufs() {
 
 					if ! hash e2fsck >/dev/null 2>&1
 					then
-						bad_msg "/sbin/e2fsck not found! aborting filesystem check"
+						bad_msg "e2fsck not found! aborting filesystem check"
 						bad_msg "Moving ${aufs_union_file#*/} to ${aufs_union_file#*/}.bad"
 
 						run mv "${aufs_dev_mnt}${aufs_union_file}" "${aufs_dev_mnt}${aufs_union_file}.bad"
@@ -915,31 +921,39 @@ findnfsmount() {
 }
 
 find_real_device() {
-	local DEVICE="${1}"
-	case "${DEVICE}" in
+	local device="${1}"
+	local real_device=
+	local candidate=
+	case "${device}" in
 		UUID\=*|LABEL\=*|PARTLABEL=*|PARTUUID\=*)
-			local REAL_DEVICE=""
 			local retval=1
 
 			if [ ${retval} -ne 0 ]
 			then
-				REAL_DEVICE=$(findfs "${DEVICE}" 2>/dev/null)
+				candidate=$(findfs "${device}" 2>/dev/null)
 				retval=$?
 			fi
 
 			if [ ${retval} -ne 0 ]
 			then
-				REAL_DEVICE=$(blkid -o device -l -t "${DEVICE}" 2>/dev/null)
+				candidate=$(blkid -o device -l -t "${device}" 2>/dev/null)
 				retval=$?
 			fi
 
-			if [ ${retval} -eq 0 ] && [ -n "${REAL_DEVICE}" ]
+			if [ ${retval} -eq 0 ] && [ -n "${candidate}" ]
 			then
-				DEVICE="${REAL_DEVICE}"
+				real_device="${candidate}"
 			fi
 		;;
+		*)
+			candidate=$(readlink -f "${device}")
+			if [ -b "${candidate}" ]
+			then
+				real_device="${candidate}"
+			fi
 	esac
-	printf "%s" "${DEVICE}"
+
+	printf "%s" "${real_device}"
 }
 
 check_loop() {
@@ -969,6 +983,12 @@ run() {
 }
 
 run_shell() {
+	if [ -f "${GK_USERINTERACTION_DISABLED_STATEFILE}" ]
+	then
+		bad_msg "gk.userinteraction.disabled is set; Spawning a shell is disabled!"
+		return
+	fi
+
 	[ -x /bin/sh ] && SH=/bin/sh || SH=/bin/ash
 
 	run touch "${GK_SHELL_LOCKFILE}"
@@ -1013,7 +1033,7 @@ run_shell() {
 
 fs_type_in_use() {
 	fs_type=$1
-	cut -d ' ' -f 3 < /proc/mounts | fgrep -q "${fs_type}"
+	cut -d ' ' -f 3 < /proc/mounts | grep -Fq "${fs_type}"
 }
 
 mount_devfs() {
@@ -1039,6 +1059,10 @@ mount_devfs() {
 		run mkdir -m 0755 /dev/pts
 		run mount -t devpts -o gid=5,mode=0620 devpts /dev/pts || bad_msg "Failed to mount /dev/pts"
 	fi
+
+	run mkdir -m 1777 /dev/shm
+	run mount -t tmpfs -o mode=1777,nosuid,nodev,strictatime tmpfs /dev/shm \
+		|| bad_msg "Failed to mount /dev/shm"
 }
 
 test_success() {
@@ -1122,6 +1146,15 @@ warn_msg() {
 	log_msg "[**] ${msg_string}"
 
 	[ "$2" != '1' ] && printf "%b\n" "${WARN}**${NORMAL}${BOLD} ${msg_string} ${NORMAL}"
+}
+
+warn_msg_n() {
+	local msg_string=${1}
+	msg_string="${msg_string:-...}"
+
+	log_msg "[**] ${msg_string}"
+
+	[ "$2" != '1' ] && printf "%b" "${WARN}**${NORMAL}${BOLD} ${msg_string}"
 }
 
 write_env_file() {
@@ -1243,6 +1276,43 @@ prompt_user() {
 	[ -n "${3}" ] && local explnt=" or : ${3}" || local explnt="."
 
 	bad_msg "Could not find the ${2} in ${oldvalue}${explnt}"
+
+	if [ -f "${GK_USERINTERACTION_DISABLED_STATEFILE}" ]
+	then
+		bad_msg "gk.userinteraction.disabled is set; No user interaction allowed!"
+
+		wait_sshd
+
+		if [ -f "${GK_SSHD_LOCKFILE}" ]
+		then
+			warn_msg "The lockfile at '${GK_SSHD_LOCKFILE}' exists."
+			warn_msg "The boot process will be paused until the lock is removed."
+			while true
+			do
+				if [ -f "${GK_SSHD_LOCKFILE}" ]
+				then
+					sleep 1
+				else
+					break
+				fi
+			done
+		fi
+
+		local timeout=${GK_PROMPT_TIMEOUT}
+		[ ${timeout} -eq 0 ] && timeout=10
+
+		warn_msg_n "System will automatically reboot in ${timeout} seconds ..."
+		while [ ${timeout} -gt 0 ]
+		do
+			let timeout=${timeout}-1
+			sleep 1
+			printf "."
+		done
+		echo
+
+		reboot -f
+	fi
+
 	bad_msg "Please specify another value or:"
 	bad_msg "- press Enter for the same"
 	bad_msg '- type "shell" for a shell'
@@ -1465,77 +1535,35 @@ start_volumes() {
 		run ln -sf /dev/device-mapper /dev/mapper/control
 	fi
 
-	if [ "${USE_MDADM}" = '1' ]
-	then
-		if [ -x '/sbin/mdadm' ]
-		then
-			local mdadm_cmd="run /sbin/mdadm --assemble --scan 2>&1"
-			is_log_enabled && mdadm_cmd="${mdadm_cmd} | tee -a '${GK_INIT_LOG}'"
-			eval "${mdadm_cmd}"
-
-			#Intel Matrix RAID (and possibly others) have a container layer above the actual volumes,
-			#So we have to look for volumes that haven't been activated.
-			mdadm_cmd="run /sbin/mdadm -IRs 2>&1"
-			is_log_enabled && mdadm_cmd="${mdadm_cmd} | tee -a '${GK_INIT_LOG}'"
-			eval "${mdadm_cmd}"
-		else
-			bad_msg "domdadm invoked but /sbin/mdadm not found; Skipping mdadm raid assembly ..."
-		fi
-	fi
-
 	if [ "${USE_MULTIPATH_NORMAL}" = '1' ]
 	then
-		for multipath_path in /sbin/multipath /bin/multipath MISSING
-		do
-			[ -x "${multipath_path}" ] && break
-		done
-
-		for dmsetup_path in /usr/sbin/dmsetup /sbin/dmsetup /bin/dmsetup MISSING
-		do
-			[ -x "${dmsetup_path}" ] && break
-		done
-
-		for kpartx_path in /sbin/kpartx /bin/kpartx MISSING
-		do
-			[ -x "${kpartx_path}" ] && break
-		done
-
-		fail=0
-		[ "${multipath_path}" = "MISSING" ] && fail=1 && bad_msg "domultipath called, but multipath binary missing! Skipping multipath"
-		[ "${dmsetup_path}" = "MISSING" ] && fail=1 && bad_msg "domultipath called, but dmsetup binary missing! Skipping multipath"
-		[ "${kpartx_path}" = "MISSING" ] && fail=1 && bad_msg "domultipath called, but kpartx binary missing! Skipping multipath"
-
-		if [ ${fail} -eq 0 ]
+		if ! hash multipath >/dev/null 2>&1
 		then
+			bad_msg "domultipath called, but multipath binary missing! Skipping multipath"
+		else
 			good_msg "Scanning for multipath devices"
-			good_msg ":: Populating scsi_id info for libudev queries"
-			run mkdir -p /run/udev/data
 
-			local ech
-			for ech in /sys/block/*
-			do
-				local tgtfile=b$(cat ${ech}/dev)
-				run /lib/udev/scsi_id -g -x /dev/${ech##*/} | sed -e 's/^/E:/' >/run/udev/data/${tgtfile}
-			done
-
-			local multipath_cmd="run ${multipath_path} -v 0 2>&1"
+			local multipath_cmd="run multipath -v 0 2>&1"
 			is_log_enabled && multipath_cmd="${multipath_cmd} | tee -a '${GK_INIT_LOG}'"
+			
 			eval "${multipath_cmd}"
-			sleep 2
-
-			good_msg "Activating multipath devices ..."
-			multipath_cmd="run ${dmsetup_path} ls --target multipath --exec '${kpartx_path} -a -v' 2>&1"
-			is_log_enabled && multipath_cmd="${multipath_cmd} | tee -a '${GK_INIT_LOG}'"
-			eval "${multipath_cmd}"
+			if [ $? -ne 0 ]
+			then
+				bad_msg "Scanning for multipath devices failed!"
+			else
+				udevsettle
+			fi
 		fi
 	fi
 
 	if [ "${USE_DMRAID_NORMAL}" = '1' ]
 	then
-		if [ -x '/sbin/dmraid' ]
+		if ! hash dmraid >/dev/null 2>&1
 		then
+			bad_msg "dodmraid invoked but 'dmraid' not found; Skipping dmraid activation ..."
+		else
 			good_msg "Activating Device-Mapper RAID(s) ..."
-			local dmraid_cmd="run /sbin/dmraid -ay"
+			local dmraid_cmd="run dmraid -ay"
 			if [ -z "${DMRAID_OPTS}" ]
 			then
 				dmraid_cmd="${dmraid_cmd} 2>&1"
@@ -1543,100 +1571,77 @@ start_volumes() {
 				dmraid_cmd="${dmraid_cmd} ${DMRAID_OPTS} 2>&1"
 			fi
 			is_log_enabled && dmraid_cmd="${dmraid_cmd} | tee -a '${GK_INIT_LOG}'"
-			eval "${dmraid_cmd}"
 
-			if [ -x '/sbin/kpartx' ]
+			eval "${dmraid_cmd}"
+			if [ $? -ne 0 ]
 			then
-				dmraid_cmd="run /sbin/dmsetup ls --exec '/sbin/kpartx -a -s' 2>&1"
-				is_log_enabled && dmraid_cmd="${dmraid_cmd} | tee -a '${GK_INIT_LOG}'"
-				eval "${dmraid_cmd}"
+				bad_msg "Activation of Device-Mapper RAID(s) failed!"
+			else
+				udevsettle
 			fi
-		else
-			bad_msg "dodmraid invoked but /sbin/dmraid not found; Skipping dmraid activation ..."
 		fi
 	fi
 
 	if [ "${USE_LVM_NORMAL}" = '1' ]
 	then
-		for lvm_path in /sbin/lvm /bin/lvm MISSING
-		do
-			[ -x "${lvm_path}" ] && break
-		done
-
-		if [ "${lvm_path}" = "MISSING" ]
+		if ! hash lvm >/dev/null 2>&1
 		then
 			bad_msg "dolvm invoked but LVM binary not available; Skipping LVM volume group activation ..."
 		else
-
 			# If there is a cache, update it. Unbreak at least dmcrypt
 			if [ -d /etc/lvm/cache ]
 			then
 				good_msg "Scanning for volume groups ..."
-				lvm_cmd="run ${lvm_path} vgscan 2>&1"
+
+				local lvm_cmd="run lvm vgscan 2>&1"
 				is_log_enabled && lvm_cmd="${lvm_cmd} | tee -a '${GK_INIT_LOG}'"
+
 				eval "${lvm_cmd}"
+				if [ $? -ne 0 ]
+				then
+					bad_msg "Scanning for volume groups failed!"
+				else
+					udevsettle
+				fi
 			fi
 
 			good_msg "Activating volume groups ..."
 
 			# To activate volumegroups on all devices in the cache
-			local lvm_cmd="run ${lvm_path} vgchange -ay --sysinit 2>&1"
+			local lvm_cmd="run lvm vgchange -ay --sysinit 2>&1"
 			is_log_enabled && lvm_cmd="${lvm_cmd} | tee -a '${GK_INIT_LOG}'"
+			
 			eval "${lvm_cmd}"
-
-			# To create symlinks so users can use root=/dev/vg/root
-			# This needs to run after vgchange, using vgchange --mknodes is too
-			# early.
-			local lvm_cmd="run ${lvm_path} vgmknodes --ignorelockingfailure 2>&1"
-			is_log_enabled && lvm_cmd="${lvm_cmd} | tee -a '${GK_INIT_LOG}'"
-			eval "${lvm_cmd}"
-		fi
-	fi
-
-	if [ "${USE_BCACHE}" = '1' ]
-	then
-		if [ ! -e /sys/fs/bcache/register_quiet ]
-		then
-			bad_msg "dobcache invoked but '/sys/fs/bcache/register_quiet' does not exist; Skipping bcache initialization ..."
-		else
-			good_msg "Registering all block devices in bcache ..."
-
-			local i=
-			for i in $(awk '$4 !~ /^(name$|$)/ { print $4 }' /proc/partitions)
-			do
-				if [ -e "/dev/${i}" ]
-				then
-					# Push all the block devices to register_quiet
-					# If its bcache, it will bring it up, if not, it will simply ignore it.
-					log_msg "COMMAND: 'echo \"/dev/${i}\" >/sys/fs/bcache/register_quiet'"
-					echo "/dev/${i}" >/sys/fs/bcache/register_quiet 2>/dev/null
-				else
-					warn_msg "'/dev/${i}' should exist but is missing; Ignoring ..."
-				fi
-			done
+			if [ $? -ne 0 ]
+			then
+				bad_msg "Activation of volume groups failed!"
+			fi
 		fi
 	fi
 
 	if [ "${USE_BTRFS}" = '1' ]
 	then
-		if [ -x '/sbin/btrfs' ]
+		if ! hash btrfs >/dev/null 2>&1
 		then
+			bad_msg "dobtrfs invoked but 'btrfs' not found; Skipping btrfs device scanning ..."
+		else
 			good_msg "Scanning for BTRFS devices ..."
 
-			local btrfs_cmd="run /sbin/btrfs device scan 2>&1"
+			local btrfs_cmd="run btrfs device scan 2>&1"
 			is_log_enabled && btrfs_cmd="${btrfs_cmd} | tee -a '${GK_INIT_LOG}'"
 
 			eval "${btrfs_cmd}"
-		else
-			bad_msg "dobtrfs invoked but /sbin/btrfs not found; Skipping btrfs device scanning ..."
+			if [ $? -ne 0 ]
+			then
+				bad_msg "Scanning for BTRFS devices failed!"
+			fi
 		fi
 	fi
 
 	if [ "${USE_ZFS}" = '1' ]
 	then
-		export ZPOOL_IMPORT_UDEV_TIMEOUT_MS=0
 		# Avoid race involving asynchronous module loading
-		if call_func_timeout waitForZFS 5
+		if [ ! -e /dev/zfs ]
 		then
 			bad_msg "Cannot import ZFS pool because /dev/zfs is missing"
 		elif [ -z "${ZFS_POOL}" ]
@@ -1645,15 +1650,13 @@ start_volumes() {
 
 			local zfs_cmd="run /sbin/zpool import -N -a ${ZPOOL_CACHE} ${ZPOOL_FORCE} 2>&1"
 			is_log_enabled && zfs_cmd="${zfs_cmd} | tee -a '${GK_INIT_LOG}'"
+
 			eval "${zfs_cmd}"
-			if [ $? -eq 0 ]
+			if [ $? -ne 0 ]
 			then
-				good_msg "Importing ZFS pools succeeded!"
-			else
-				bad_msg "Imported ZFS pools failed!"
+				bad_msg "Importing ZFS pools failed!"
 			fi
 		else
-
 			if [ "$(zpool list -H -o name ${ZFS_POOL} 2>&1)" = "${ZFS_POOL}" ]
 			then
 				good_msg "ZFS pool ${ZFS_POOL} already imported."
@@ -1664,28 +1667,40 @@ start_volumes() {
 
 					local zfs_cmd="run /sbin/zpool export -f '${ZFS_POOL}' 2>&1"
 					is_log_enabled && zfs_cmd="${zfs_cmd} | tee -a '${GK_INIT_LOG}'"
+
 					eval "${zfs_cmd}"
+					if [ $? -ne 0 ]
+					then
+						bad_msg "Exporting ZFS pools failed!"
+					else
+						udevsettle
+					fi
 
 					zfs_cmd="run /sbin/zpool import -N ${ZPOOL_CACHE} ${ZPOOL_FORCE} '${ZFS_POOL}' 2>&1"
 					is_log_enabled && zfs_cmd="${zfs_cmd} | tee -a '${GK_INIT_LOG}'"
+
 					eval "${zfs_cmd}"
+					if [ $? -ne 0 ]
+					then
+						bad_msg "Re-importing ZFS pools failed!"
+					fi
 				fi
 			else
 				good_msg "Importing ZFS pool ${ZFS_POOL} ..."
 
 				local zfs_cmd="run /sbin/zpool import -N ${ZPOOL_CACHE} ${ZPOOL_FORCE} '${ZFS_POOL}' 2>&1"
 				is_log_enabled && zfs_cmd="${zfs_cmd} | tee -a '${GK_INIT_LOG}'"
+
 				eval "${zfs_cmd}"
-				if [ $? -eq 0 ]
+				if [ $? -ne 0 ]
 				then
-					good_msg "Import of ${ZFS_POOL} succeeded!"
-				else
 					bad_msg "Import of ${ZFS_POOL} failed!"
 				fi
 			fi
 		fi
-		unset ZPOOL_IMPORT_UDEV_TIMEOUT_MS
 	fi
+
+	udevsettle
 }
 
 start_iscsi() {
@@ -1697,7 +1712,14 @@ start_iscsi() {
 
 		iscsi_cmd="run iscsistart -b 2>&1"
 		is_log_enabled && iscsi_cmd="${iscsi_cmd} | tee -a '${GK_INIT_LOG}'"
+
 		eval "${iscsi_cmd}"
+		if [ $? -ne 0 ]
+		then
+			bad_msg "Activation of iSCSI via iBFT failed!"
+		else
+			udevsettle
+		fi
 	fi
 
 	if [ -n "${ISCSI_INITIATORNAME}" ] && [ -n "${ISCSI_TARGET}" ] && [ -n "${ISCSI_ADDRESS}" ]
@@ -1743,7 +1765,14 @@ start_iscsi() {
 
 		iscsi_cmd="run iscsistart -i '${ISCSI_INITIATORNAME}' -t '${ISCSI_TARGET}' -a '${ISCSI_ADDRESS}' ${ADDITIONAL} 2>&1"
 		is_log_enabled && iscsi_cmd="${iscsi_cmd} | tee -a '${GK_INIT_LOG}'"
+
 		eval "${iscsi_cmd}"
+		if [ $? -ne 0 ]
+		then
+			bad_msg "Activation of iSCSI via cmdline failed!"
+		else
+			udevsettle
+		fi
 	fi
 }
 
@@ -1752,7 +1781,7 @@ start_iscsi() {
 # It is either the root or a swap, other devices are supported in the scripts provided with sys-fs/cryptsetup
 # $1 - root/swap
 openLUKS() {
-	if [ ! -x /sbin/cryptsetup ]
+	if ! hash cryptsetup >/dev/null 2>&1
 	then
 		bad_msg "cryptsetup program is missing. Was initramfs built without --luks parameter?"
 		exit 1
@@ -1923,7 +1952,8 @@ openLUKS() {
 					then
 						REAL_LUKS_KEYDEV=$(find_real_device "${LUKS_KEYDEV}")
 						if [ -b "${REAL_LUKS_KEYDEV}" ]
-						then good_msg "Using key device ${REAL_LUKS_KEYDEV}." ${CRYPT_SILENT}
+						then
+							good_msg "Using key device ${REAL_LUKS_KEYDEV}." ${CRYPT_SILENT}
 						else
 							good_msg "Please insert removable device ${LUKS_KEYDEV} for ${LUKS_NAME}" ${CRYPT_SILENT}
 							# abort after 10 secs
@@ -1983,7 +2013,7 @@ openLUKS() {
 
 					if [ "$(echo ${LUKS_KEY} | grep -o '.gpg$')" = ".gpg" ]
 					then
-						if [ ! -x '/usr/bin/gpg' ]
+						if ! hash gpg >/dev/null 2>&1
 						then
 							bad_msg "GPG-encrypted key file provided but gpg program is missing. Was initramfs built without --gpg parameter?"
 							bad_msg "Falling back to passphrase usage!"
@@ -1991,7 +2021,7 @@ openLUKS() {
 							[ -e /dev/tty ] && run mv /dev/tty /dev/tty.org
 							run mknod /dev/tty c 5 1
 							cryptsetup_options="${cryptsetup_options} -d -"
-							gpg_cmd="/usr/bin/gpg --logger-file /dev/null --quiet --decrypt ${mntkey}${LUKS_KEY} |"
+							gpg_cmd="gpg --logger-file /dev/null --quiet --decrypt ${mntkey}${LUKS_KEY} |"
 						fi
 					else
 						cryptsetup_options="${cryptsetup_options} -d ${mntkey}${LUKS_KEY}"
@@ -2020,6 +2050,8 @@ openLUKS() {
 			fi
 		fi
 	done
+
+	udevsettle
 
 	if run mountpoint "${mntkey}" >/dev/null 2>&1
 	then
@@ -2063,6 +2095,7 @@ start_network() {
 	# Load network modules only when we need them to avoid possible
 	# firmware problems for people not using network that early
 	modules_scan net
+	udevsettle
 
 	# At least gk.net.iface can only be processed after sysfs was
 	# mounted.
@@ -2406,7 +2439,7 @@ start_sshd() {
 		return
 	fi
 
-	if [ ! -x "/usr/sbin/dropbear" ]
+	if ! hash dropbear >/dev/null 2>&1
 	then
 		bad_msg "/usr/sbin/dropbear not found! Was initramfs built without --ssh parameter?"
 		return
@@ -2425,7 +2458,7 @@ start_sshd() {
 	run touch /var/log/lastlog
 
 	good_msg "Starting dropbear sshd ..." ${QUIET}
-	run /usr/sbin/dropbear -p ${GK_SSHD_PORT} -R -P "${GK_SSHD_PIDFILE}" 2>/var/log/dropbear.log
+	run dropbear -p ${GK_SSHD_PORT} -R -P "${GK_SSHD_PIDFILE}" 2>/var/log/dropbear.log
 	if [ $? -eq 0 ]
 	then
 		if [ "${GK_PROMPT_TIMEOUT}" = '0' ]
@@ -2577,12 +2610,13 @@ cdupdate() {
 
 setup_btrfsctl() {
 	# start BTRFS volume detection, if available
-	if [ -x /sbin/btrfsctl ]
+	if hash btrfsctl >/dev/null 2>&1
 	then
-		local btrfs_cmd="run /sbin/btrfsctl -a 2>&1"
+		local btrfs_cmd="run btrfsctl -a 2>&1"
 		is_log_enabled && btrfs_cmd="${btrfs_cmd} | tee -a '${GK_INIT_LOG}'"
 
 		eval "${btrfs_cmd}"
+		udevsettle
 	fi
 }
 
@@ -2599,6 +2633,15 @@ rundebugshell() {
 }
 
 do_resume() {
+	local device=$(find_real_device "${REAL_RESUME}")
+	if [ -z "${device}" ]
+	then
+		warn_msg "REAL_RESUME (${REAL_RESUME}) device not found; Skipping resume ..."
+		return 0
+	else
+		REAL_RESUME="${device}"
+	fi
+
 	if [ -d /proc/suspend2 -o -d /sys/power/suspend2 -o -d /sys/power/tuxonice ]
 	then
 		tuxonice_resume
@@ -2615,7 +2658,7 @@ swsusp_resume() {
 		log_msg "Trying to resume using swsusp ..."
 		log_msg "COMMAND: 'echo \"${device}\" > /sys/power/resume'"
 		echo "${device}" > /sys/power/resume
-		log_msg "System is not resuming, probably because it wasn't suspended; Continue normal booting ..."
+		log_msg "System is not resuming from ${REAL_RESUME}, probably because it wasn't suspended; Continue normal booting ..."
 	fi
 }
 
@@ -2682,7 +2725,7 @@ tuxonice_resume() {
 	echo "${REAL_RESUME}" > "${tuxonice_resumedev}"
 	log_msg "COMMAND: 'echo > ${tuxonice_do_resume}'"
 	echo > "${tuxonice_do_resume}"
-	log_msg "System is not resuming, probably because it wasn't suspended; Continue normal booting ..."
+	log_msg "System is not resuming from ${REAL_RESUME}, probably because it wasn't suspended; Continue normal booting ..."
 }
 
 find_loop() {

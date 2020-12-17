@@ -16,14 +16,8 @@ determine_kernel_config_file() {
 			gen_die "--kernel-config file '${KERNEL_CONFIG}' does not exist!"
 		fi
 
-		if isTrue "$(is_gzipped "${KERNEL_CONFIG}")"
-		then
-			local CONFGREP=zgrep
-		else
-			local CONFGREP=grep
-		fi
-
-		if ! ${CONFGREP} -qE '^CONFIG_.*=' "${KERNEL_CONFIG}" &>/dev/null
+		local confgrep_cmd=$(get_grep_cmd_for_file "${KERNEL_CONFIG}")
+		if ! "${confgrep_cmd}" -qE '^CONFIG_.*=' "${KERNEL_CONFIG}" &>/dev/null
 		then
 			gen_die "--kernel-config file '${KERNEL_CONFIG}' does not look like a valid kernel config: File does not contain any CONFIG_* value!"
 		fi
@@ -119,63 +113,119 @@ set_initramfs_compression_method() {
 
 	local kernel_config=${1}
 
-	local compress_config=NONE
 	local -a KNOWN_INITRAMFS_COMPRESSION_TYPES=()
 	KNOWN_INITRAMFS_COMPRESSION_TYPES+=( NONE )
-	KNOWN_INITRAMFS_COMPRESSION_TYPES+=( GZIP )
-	KNOWN_INITRAMFS_COMPRESSION_TYPES+=( BZIP2 )
-	KNOWN_INITRAMFS_COMPRESSION_TYPES+=( LZMA )
-	KNOWN_INITRAMFS_COMPRESSION_TYPES+=( XZ )
-	KNOWN_INITRAMFS_COMPRESSION_TYPES+=( LZO )
-	KNOWN_INITRAMFS_COMPRESSION_TYPES+=( LZ4 )
+	KNOWN_INITRAMFS_COMPRESSION_TYPES+=( $(get_initramfs_compression_method_by_compression) )
 
-	case ${COMPRESS_INITRD_TYPE} in
-		gz)
-			compress_config='GZIP'
-			;;
-		bz2)
-			compress_config='BZIP2'
-			;;
-		lzma)
-			compress_config='LZMA'
-			;;
-		xz|best|fastest)
-			compress_config='XZ'
-			;;
-		lzop)
-			compress_config='LZO'
-			;;
-		lz4)
-			compress_config='LZ4'
-			;;
-	esac
+	if [[ "${COMPRESS_INITRD_TYPE}" =~ ^(BEST|FASTEST)$ ]]
+	then
+		print_info 5 "Determining '${COMPRESS_INITRD_TYPE}' compression method for initramfs using kernel config '${kernel_config}' ..."
+		local ranked_methods
+		if [[ "${COMPRESS_INITRD_TYPE}" == "BEST" ]]
+		then
+			ranked_methods=( $(get_initramfs_compression_method_by_compression) )
+		else
+			ranked_methods=( $(get_initramfs_compression_method_by_speed) )
+		fi
+
+		local ranked_method
+		for ranked_method in "${ranked_methods[@]}"
+		do
+			print_info 5 "Checking if we can use '${ranked_method}' compression ..."
+
+			# Do we have the user space tool?
+			local compression_tool=${GKICM_LOOKUP_TABLE_CMD[${ranked_method}]/%\ */}
+			if ! hash ${compression_tool} &>/dev/null
+			then
+				print_info 5 "Cannot use '${ranked_method}' compression, the tool '${compression_tool}' to compress initramfs was not found. Is ${GKICM_LOOKUP_TABLE_PKG[${ranked_method}]} installed?"
+				continue
+			fi
+
+			# Is the kernel able to decompress?
+			local koption="CONFIG_RD_${ranked_method}"
+			local value_koption=$(kconfig_get_opt "${kernel_config}" "${koption}")
+			if [[ "${value_koption}" != "y" ]]
+			then
+				print_info 5 "Cannot use '${ranked_method}' compression, kernel option '${koption}' is not set!"
+				continue
+			fi
+
+			print_info 5 "Will use '${ranked_method}' compression -- all requirements are met!"
+			COMPRESS_INITRD_TYPE=${ranked_method}
+			break
+		done
+		unset ranked_method ranked_methods koption value_koption
+
+		if [[ "${COMPRESS_INITRD_TYPE}" =~ ^(BEST|FASTEST)$ ]]
+		then
+			gen_die "None of the initramfs compression methods we tried are supported by your kernel (config file \"${kernel_config}\"), strange!?"
+		fi
+	fi
+
+	if ! isTrue "${BUILD_KERNEL}"
+	then
+		local cfg_DECOMPRESS_SUPPORT=$(kconfig_get_opt "${kernel_config}" "CONFIG_RD_${COMPRESS_INITRD_TYPE}")
+		if [[ "${cfg_DECOMPRESS_SUPPORT}" != "y" ]]
+		then
+			gen_die "The kernel config '${kernel_config}' this initramfs will be build for cannot decompress set --compress-initrd-type '${COMPRESS_INITRD_TYPE}'!"
+		fi
+
+		# If we are not building kernel, there is no point in
+		# changing kernel config file at all so exit function
+		# here.
+		return
+	fi
+
+	local KOPTION_PREFIX=CONFIG_RD_
+	[ ${KV_NUMERIC} -ge 4010 ] && KOPTION_PREFIX=CONFIG_INITRAMFS_COMPRESSION_
+
+	# CONFIG_INITRAMFS_<TYPE> options are only used when CONFIG_INITRAMFS_SOURCE
+	# is set. However, we cannot just check for INTEGRATED_INITRAMFS option here
+	# because on first run kernel will still get compiled without
+	# CONFIG_INITRAMFS_SOURCE set.
+	local has_initramfs_source=no
+	local cfg_CONFIG_INITRAMFS_SOURCE=$(kconfig_get_opt "${kernel_config}" "CONFIG_INITRAMFS_SOURCE")
+	[[ -n "${cfg_CONFIG_INITRAMFS_SOURCE}" && ${#cfg_CONFIG_INITRAMFS_SOURCE} -gt 2 ]] && has_initramfs_source=yes
 
 	local KNOWN_INITRAMFS_COMPRESSION_TYPE
-	local KOPTION_VALUE
+	local KOPTION_VALUE KOPTION_CURRENT_VALUE
 	for KNOWN_INITRAMFS_COMPRESSION_TYPE in "${KNOWN_INITRAMFS_COMPRESSION_TYPES[@]}"
 	do
 		KOPTION_VALUE=n
-		if [[ "${KNOWN_INITRAMFS_COMPRESSION_TYPE}" == "${compress_config}" ]]
+		if [[ "${KNOWN_INITRAMFS_COMPRESSION_TYPE}" == "${COMPRESS_INITRD_TYPE}" ]]
 		then
 			KOPTION_VALUE=y
 		fi
 
-		if [ ${KV_NUMERIC} -ge 4010 ]
+		if isTrue "${has_initramfs_source}"
 		then
-			kconfig_set_opt "${kernel_config}" "CONFIG_INITRAMFS_COMPRESSION_${KNOWN_INITRAMFS_COMPRESSION_TYPE}" "${KOPTION_VALUE}"
-
-			if [[ "${KOPTION_VALUE}" == "y" && "${KNOWN_INITRAMFS_COMPRESSION_TYPE}" != "NONE" ]]
+			KOPTION_CURRENT_VALUE=$(kconfig_get_opt "${kernel_config}" "${KOPTION_PREFIX}${KNOWN_INITRAMFS_COMPRESSION_TYPE}")
+			if [[ -n "${KOPTION_CURRENT_VALUE}" ]] \
+				&& [[ "${KOPTION_VALUE}" != "${KOPTION_CURRENT_VALUE}" ]]
 			then
-				# Make sure that the kernel can decompress our initramfs
-				kconfig_set_opt "${kernel_config}" "CONFIG_RD_${KNOWN_INITRAMFS_COMPRESSION_TYPE}" "${KOPTION_VALUE}"
+				# We have to ensure that only the initramfs compression
+				# we want to use is enabled or the last one listed in
+				# $KERNEL_DIR/usr/Makefile will be used
+				# However, no need to set =n value when option isn't set
+				# at all (this will save us one additional "make oldconfig"
+				# run due to changed kernel options).
+				kconfig_set_opt "${kernel_config}" "${KOPTION_PREFIX}${KNOWN_INITRAMFS_COMPRESSION_TYPE}" "${KOPTION_VALUE}"
 			fi
-		else
-			[[ "${KNOWN_INITRAMFS_COMPRESSION_TYPE}" == "NONE" ]] && continue
 
-			# In <linux-4.10, to control used initramfs compression, we have to
-			# disable every supported compression type except compression type
-			# we want to use, (see $KERNEL_DIR/usr/Makefile).
+			if [[ "${KOPTION_VALUE}" == "y" ]]
+			then
+				echo "${KOPTION_PREFIX}${KNOWN_INITRAMFS_COMPRESSION_TYPE}" >> "${KCONFIG_REQUIRED_OPTIONS}" \
+					|| gen_die "Failed to add '${KOPTION_PREFIX}${KNOWN_INITRAMFS_COMPRESSION_TYPE}' to '${KCONFIG_REQUIRED_OPTIONS}'!"
+			fi
+		fi
+
+		if [[ "${KOPTION_VALUE}" == "y" && "${KNOWN_INITRAMFS_COMPRESSION_TYPE}" != "NONE" ]]
+		then
+			# Make sure that the kernel can always decompress our initramfs
 			kconfig_set_opt "${kernel_config}" "CONFIG_RD_${KNOWN_INITRAMFS_COMPRESSION_TYPE}" "${KOPTION_VALUE}"
+
+			echo "CONFIG_RD_${KNOWN_INITRAMFS_COMPRESSION_TYPE}" >> "${KCONFIG_REQUIRED_OPTIONS}" \
+				|| gen_die "Failed to add 'CONFIG_RD_${KNOWN_INITRAMFS_COMPRESSION_TYPE}' to '${KCONFIG_REQUIRED_OPTIONS}'!"
 		fi
 	done
 }
@@ -291,25 +341,40 @@ config_kernel() {
 	local -a required_kernel_options
 	[ -f "${KCONFIG_MODIFIED_MARKER}" ] && rm "${KCONFIG_MODIFIED_MARKER}"
 
-	# Ensure kernel supports initramfs
 	if isTrue "${BUILD_RAMDISK}"
 	then
-		kconfig_set_opt "${KERNEL_OUTPUTDIR}/.config" "CONFIG_BLK_DEV_INITRD" "y"
-	fi
+		# We really need this or we will fail to boot
+		print_info 2 "$(get_indent 1)>> Ensure that required kernel options for genkernel's initramfs usage are set ..."
 
-	# --integrated-initramfs handling
-	if isTrue "${INTEGRATED_INITRAMFS}"
-	then
+		# Ensure kernel supports initramfs
+		kconfig_set_opt "${KERNEL_OUTPUTDIR}/.config" "CONFIG_BLK_DEV_INITRD" "y"
+
+		# Stuff required by init script
+		kconfig_set_opt "${KERNEL_OUTPUTDIR}/.config" "CONFIG_MMU" "y"
+		kconfig_set_opt "${KERNEL_OUTPUTDIR}/.config" "CONFIG_SHMEM" "y"
+		kconfig_set_opt "${KERNEL_OUTPUTDIR}/.config" "CONFIG_TMPFS" "y" \
+			&& required_kernel_options+=( 'CONFIG_TMPFS' )
+
+		kconfig_set_opt "${KERNEL_OUTPUTDIR}/.config" "CONFIG_TTY" "y" \
+			&& required_kernel_options+=( 'CONFIG_TTY' )
+
+		kconfig_set_opt "${KERNEL_OUTPUTDIR}/.config" "CONFIG_UNIX98_PTYS" "y" \
+			&& required_kernel_options+=( 'CONFIG_UNIX98_PTYS' )
+
+		# Make sure that CONFIG_INITRAMFS_SOURCE is unset so we don't clash
+		# with any other genkernel functionality.
 		local cfg_CONFIG_INITRAMFS_SOURCE=$(kconfig_get_opt "${KERNEL_OUTPUTDIR}/.config" "CONFIG_INITRAMFS_SOURCE")
 		if [[ -n "${cfg_CONFIG_INITRAMFS_SOURCE}" && ${#cfg_CONFIG_INITRAMFS_SOURCE} -gt 2 ]]
 		then
 			# Checking value length to allow 'CONFIG_INITRAMFS_SOURCE=' and 'CONFIG_INITRAMFS_SOURCE=""'
-			print_info 2 "$(get_indent 1)>> CONFIG_INITRAMFS_SOURCE is already set; Unsetting to avoid clashing with --integrated-initramfs ..."
+			print_info 2 "$(get_indent 1)>> CONFIG_INITRAMFS_SOURCE is set; Unsetting to avoid problems ..."
 			kconfig_set_opt "${KERNEL_OUTPUTDIR}/.config" "CONFIG_INITRAMFS_SOURCE" ""
 		fi
-	elif isTrue "${COMPRESS_INITRD}"
-	then
-		set_initramfs_compression_method "${KERNEL_OUTPUTDIR}/.config"
+
+		if isTrue "${COMPRESS_INITRD}"
+		then
+			set_initramfs_compression_method "${KERNEL_OUTPUTDIR}/.config"
+		fi
 	fi
 
 	# Force this on if we are using --genzimage
@@ -401,17 +466,6 @@ config_kernel() {
 		fi
 	fi
 
-	if isTrue "${BUILD_RAMDISK}"
-	then
-		# We really need this or we will fail to boot
-		print_info 2 "$(get_indent 1)>> Ensure that required kernel options for genkernel's initramfs usage are set ..."
-		kconfig_set_opt "${KERNEL_OUTPUTDIR}/.config" "CONFIG_TTY" "y" \
-			&& required_kernel_options+=( 'CONFIG_TTY' )
-
-		kconfig_set_opt "${KERNEL_OUTPUTDIR}/.config" "CONFIG_UNIX98_PTYS" "y" \
-			&& required_kernel_options+=( 'CONFIG_UNIX98_PTYS' )
-	fi
-
 	# If the user has configured DM as built-in, we need to respect that.
 	local cfg_CONFIG_BLK_DEV_DM=$(kconfig_get_opt "${KERNEL_OUTPUTDIR}/.config" "CONFIG_BLK_DEV_DM")
 	case "${cfg_CONFIG_BLK_DEV_DM}" in
@@ -493,12 +547,21 @@ config_kernel() {
 			y|m) ;; # Do nothing
 			*) cfg_CONFIG_CRYPTO_AES=${newcfg_setting}
 		esac
+
+		local cfg_CONFIG_CRYPTO_SERPENT=$(kconfig_get_opt "${KERNEL_OUTPUTDIR}/.config" "CONFIG_CRYPTO_SERPENT")
+		case "${cfg_CONFIG_CRYPTO_SERPENT}" in
+			y|m) ;; # Do nothing
+			*) cfg_CONFIG_CRYPTO_SERPENT=${newcfg_setting}
+		esac
+
 		kconfig_set_opt "${KERNEL_OUTPUTDIR}/.config" "CONFIG_CRYPTO_XTS" "${cfg_CONFIG_CRYPTO_AES}" \
 			&& required_kernel_options+=( 'CONFIG_CRYPTO_XTS' )
 		kconfig_set_opt "${KERNEL_OUTPUTDIR}/.config" "CONFIG_CRYPTO_SHA256" "${cfg_CONFIG_CRYPTO_AES}" \
 			&& required_kernel_options+=( 'CONFIG_CRYPTO_SHA256' )
 		kconfig_set_opt "${KERNEL_OUTPUTDIR}/.config" "CONFIG_CRYPTO_AES" "${cfg_CONFIG_CRYPTO_AES}" \
 			&& required_kernel_options+=( 'CONFIG_CRYPTO_AES' )
+		kconfig_set_opt "${KERNEL_OUTPUTDIR}/.config" "CONFIG_CRYPTO_SERPENT" "${cfg_CONFIG_CRYPTO_SERPENT}" \
+			&& required_kernel_options+=( 'CONFIG_CRYPTO_SERPENT' )
 		kconfig_set_opt "${KERNEL_OUTPUTDIR}/.config" "CONFIG_CRYPTO_USER_API_HASH" "${cfg_CONFIG_CRYPTO_AES}" \
 			&& required_kernel_options+=( 'CONFIG_CRYPTO_USER_API_HASH' )
 		kconfig_set_opt "${KERNEL_OUTPUTDIR}/.config" "CONFIG_CRYPTO_USER_API_SKCIPHER" "${cfg_CONFIG_CRYPTO_AES}" \
@@ -533,9 +596,21 @@ config_kernel() {
 			then
 				kconfig_set_opt "${KERNEL_OUTPUTDIR}/.config" "CONFIG_CRYPTO_SHA1_SSSE3" "${cfg_CONFIG_CRYPTO_AES}"
 				kconfig_set_opt "${KERNEL_OUTPUTDIR}/.config" "CONFIG_CRYPTO_SHA256_SSSE3" "${cfg_CONFIG_CRYPTO_AES}"
-				kconfig_set_opt "${KERNEL_OUTPUTDIR}/.config" "CONFIG_CRYPTO_AES_X86_64" "${cfg_CONFIG_CRYPTO_AES}"
+				kconfig_set_opt "${KERNEL_OUTPUTDIR}/.config" "CONFIG_CRYPTO_SERPENT_SSE2_X86_64" "${cfg_CONFIG_CRYPTO_SERPENT}"
+				kconfig_set_opt "${KERNEL_OUTPUTDIR}/.config" "CONFIG_CRYPTO_SERPENT_AVX_X86_64" "${cfg_CONFIG_CRYPTO_SERPENT}"
+				kconfig_set_opt "${KERNEL_OUTPUTDIR}/.config" "CONFIG_CRYPTO_SERPENT_AVX2_X86_64" "${cfg_CONFIG_CRYPTO_SERPENT}"
+
+				if [ ${KV_NUMERIC} -lt 5004 ]
+				then
+					kconfig_set_opt "${KERNEL_OUTPUTDIR}/.config" "CONFIG_CRYPTO_AES_X86_64" "${cfg_CONFIG_CRYPTO_AES}"
+				fi
 			else
-				kconfig_set_opt "${KERNEL_OUTPUTDIR}/.config" "CONFIG_CRYPTO_AES_586" "${cfg_CONFIG_CRYPTO_AES}"
+				if [ ${KV_NUMERIC} -lt 5004 ]
+				then
+					kconfig_set_opt "${KERNEL_OUTPUTDIR}/.config" "CONFIG_CRYPTO_AES_586" "${cfg_CONFIG_CRYPTO_AES}"
+				fi
+
+				kconfig_set_opt "${KERNEL_OUTPUTDIR}/.config" "CONFIG_CRYPTO_SERPENT_SSE2_586" "${cfg_CONFIG_CRYPTO_SERPENT}"
 			fi
 		fi
 	fi
@@ -956,6 +1031,12 @@ config_kernel() {
 		else
 			print_info 1 "$(get_indent 1)>> Running 'make olddefconfig' due to changed kernel options ..."
 			compile_generic olddefconfig kernel 2>/dev/null
+		fi
+
+		if [ -f "${KCONFIG_REQUIRED_OPTIONS}" ]
+		then
+			# Pick up required options from other functions
+			required_kernel_options+=( $(cat "${KCONFIG_REQUIRED_OPTIONS}" | sort -u) )
 		fi
 
 		print_info 2 "$(get_indent 1)>> Checking if required kernel options are still present ..."

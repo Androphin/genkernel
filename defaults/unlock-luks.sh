@@ -37,14 +37,17 @@ then
 fi
 
 main() {
-	if [ ! -x /sbin/cryptsetup ]
+	if ! hash cryptsetup >/dev/null 2>&1
 	then
 		bad_msg "cryptsetup program is missing. Was initramfs built without --luks parameter?"
 		exit 1
 	fi
 
-	eval local LUKS_DEVICE='"${CRYPT_'${TYPE}'}"' LUKS_NAME="${NAME}" LUKS_KEY='"${CRYPT_KEYFILE_'${TYPE}'}"'
-	eval local LUKS_TRIM='"${CRYPT_'${TYPE}'_TRIM}"' OPENED_LOCKFILE='"${CRYPT_'${TYPE}'_OPENED_LOCKFILE}"'
+	local LUKS_NAME="${NAME}"
+	eval local LUKS_DEVICE='"${CRYPT_'${TYPE}'}"'
+	eval local LUKS_KEY='"${CRYPT_'${TYPE}'_KEYFILE}"'
+	eval local LUKS_TRIM='"${CRYPT_'${TYPE}'_TRIM}"'
+	eval local OPENED_LOCKFILE='"${CRYPT_'${TYPE}'_OPENED_LOCKFILE}"'
 
 	while true
 	do
@@ -63,7 +66,6 @@ main() {
 				exit 1
 			fi
 
-			setup_md_device "${LUKS_DEVICE}"
 			if ! run cryptsetup isLuks "${LUKS_DEVICE}"
 			then
 				bad_msg "The LUKS device ${LUKS_DEVICE} does not contain a LUKS header" "${CRYPT_SILENT}"
@@ -108,6 +110,8 @@ main() {
 			fi
 		fi
 	done
+
+	udevsettle
 
 	if [ -s "${LUKS_KEY}" ]
 	then

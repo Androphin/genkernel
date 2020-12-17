@@ -440,6 +440,27 @@ gen_die() {
 	exit 1
 }
 
+get_grep_cmd_for_file() {
+	[[ ${#} -ne 1 ]] \
+		&& gen_die "$(get_useful_function_stack "${FUNCNAME}")Invalid usage of ${FUNCNAME}(): Function takes exactly one argument (${#} given)!"
+
+	local config_file=${1}
+
+	local grep_cmd=${GREP_CMD}
+	if isTrue "$(is_gzipped "${config_file}")"
+	then
+		grep_cmd=${ZGREP_CMD}
+	fi
+
+	# zgrep for example is optional
+	if [ -z "${grep_cmd}" ]
+	then
+		gen_die "$(get_useful_function_stack "${FUNCNAME}")No grep implementation found which can process '${config_file}'!"
+	fi
+
+	echo "${grep_cmd}"
+}
+
 # @FUNCTION: get_indent
 # @USAGE: <level>
 # @DESCRIPTION:
@@ -462,6 +483,32 @@ get_indent() {
 	done
 
 	echo "${_indent}"
+}
+
+get_initramfs_compression_method_by_compression() {
+	local -a methods=()
+	methods+=( XZ )
+	methods+=( LZMA )
+	methods+=( ZSTD )
+	methods+=( GZIP )
+	methods+=( BZIP2 )
+	methods+=( LZO )
+	methods+=( LZ4 )
+
+	echo "${methods[@]}"
+}
+
+get_initramfs_compression_method_by_speed() {
+	local -a methods=()
+	methods+=( LZ4 )
+	methods+=( ZSTD )
+	methods+=( LZO )
+	methods+=( GZIP )
+	methods+=( BZIP2 )
+	methods+=( LZMA )
+	methods+=( XZ )
+
+	echo "${methods[@]}"
 }
 
 setup_cache_dir() {
@@ -1056,7 +1103,9 @@ get_tc_vars() {
 	tc_vars+=( STRIP )
 	tc_vars+=( NM )
 	tc_vars+=( RANLIB )
+	tc_vars+=( READELF )
 	tc_vars+=( OBJCOPY )
+	tc_vars+=( OBJDUMP )
 	tc_vars+=( PKG_CONFIG )
 
 	echo "${tc_vars[@]}"
@@ -1083,6 +1132,24 @@ get_temp_file() {
 		&& gen_die "$(get_useful_function_stack "${FUNCNAME}")'mktemp -p \"${tmpdir}\" ${template}' failed!"
 
 	echo "${tempfile}"
+}
+
+get_udevdir() {
+	local pkg_config=$(tc-getPKG_CONFIG)
+
+	if ${pkg_config} --exists udev
+	then
+		local udevdir="$(${pkg_config} --variable=udevdir udev)"
+
+		if [ -n "${BROOT}" ]
+		then
+			udevdir="${udevdir#${BROOT%/}}"
+		fi
+	else
+		udevdir="/lib/udev"
+	fi
+
+	echo "${udevdir}"
 }
 
 get_useful_function_stack() {
@@ -1141,10 +1208,19 @@ _tc-getPROG() {
 		type=KERNEL
 	fi
 
-	local prog_default_varname="DEFAULT_${type}_${var}"
-	local prog_override_varname="${type}_${var}"
+	local prog_default_varname=
+	local prog_override_varname=
+	for v in ${vars} ; do
+		prog_default_varname="DEFAULT_${type}_${v}"
+		if [[ -n "${!prog_default_varname}" ]]
+		then
+			prog_override_varname="${type}_${v}"
+			break
+		fi
+	done
 
 	if [[ -n "${!prog_default_varname}" ]] \
+		&& [[ -n "${!prog_override_varname}" ]] \
 		&& [[ "${!prog_override_varname}" != "${!prog_default_varname}" ]]
 	then
 		# User wants to run specific program
@@ -1213,15 +1289,32 @@ tc-getAR() {
 }
 
 tc-getAS() {
-	tc-getPROG AR ar "$@"
+	tc-getPROG AS as "$@"
+}
+
+tc-getBUILD_AR() {
+	tc-getBUILD_PROG AR ar "$@"
 }
 
 tc-getBUILD_CC() {
 	tc-getBUILD_PROG CC gcc "$@"
 }
 
+tc-getBUILD_CPP() {
+	local cc=$(tc-getBUILD_CC)
+	tc-getPROG CPP "${cc} -E" "$@"
+}
+
 tc-getBUILD_CXX() {
 	tc-getBUILD_PROG CXX g++ "$@"
+}
+
+tc-getBUILD_LD() {
+	tc-getBUILD_PROG LD ld "$@"
+}
+
+tc-getBUILD_READELF() {
+	tc-getBUILD_PROG READELF readelf "$@"
 }
 
 tc-getCC() {
@@ -1253,6 +1346,19 @@ tc-getOBJDUMP() {
 	tc-getPROG OBJDUMP objdump "$@"
 }
 
+tc-getPKG_CONFIG() {
+	if [ -n "${BROOT}" ]
+	then
+		echo "${BROOT}/usr/bin/pkg-config-wrapper"
+	else
+		tc-getPROG PKG_CONFIG pkg-config "$@"
+	fi
+}
+
+tc-getREADELF() {
+	tc-getPROG READELF readelf "$@"
+}
+
 tc-getBUILD_PROG() {
 	local vars="BUILD_$1 $1_FOR_BUILD HOST$1"
 	# respect host vars if not cross-compiling
@@ -1266,15 +1372,11 @@ tc-getPROG() {
 }
 
 tc-getRANLIB() {
-	tc-getPROG RANLIB ranlib
+	tc-getPROG RANLIB ranlib "$@"
 }
 
 tc-getSTRIP() {
-	tc-getPROG STRIP strip
-}
-
-tc-getSTRIP() {
-	tc-getPROG STRIP strip "$@";
+	tc-getPROG STRIP strip "$@"
 }
 
 tc-is-cross-compiler() {
@@ -1422,6 +1524,7 @@ gkbuild() {
 		"OBJCOPY='$(tc-getOBJCOPY)'"
 		"OBJDUMP='$(tc-getOBJDUMP)'"
 		"RANLIB='$(tc-getRANLIB)'"
+		"READELF='$(tc-getREADELF)'"
 		"STRIP='$(tc-getSTRIP)'"
 	)
 
@@ -1750,7 +1853,7 @@ check_disk_space_requirements() {
 			gen_die "--check-free-disk-space-bootdir value '${CHECK_FREE_DISK_SPACE_BOOTDIR}' is not a valid number!"
 		fi
 
-		available_free_disk_space=$(unset POSIXLY_CORRECT && df -BM "${BOOTDIR}" | awk '$3 ~ /[0-9]+/ { print $4 }')
+		available_free_disk_space=$(unset POSIXLY_CORRECT && LC_ALL="C" df -BM "${BOOTDIR}" | awk '$3 ~ /[0-9]+/ { print $4 }')
 		if [ -n "${available_free_disk_space}" ]
 		then
 			print_info 2 '' 1 0
@@ -1787,7 +1890,7 @@ check_disk_space_requirements() {
 			gen_die "--check-free-disk-space-kerneloutputdir value '${CHECK_FREE_DISK_SPACE_KERNELOUTPUTDIR}' is not a valid number!"
 		fi
 
-		available_free_disk_space=$(unset POSIXLY_CORRECT && df -BM "${KERNEL_OUTPUTDIR}" | awk '$3 ~ /[0-9]+/ { print $4 }')
+		available_free_disk_space=$(unset POSIXLY_CORRECT && LC_ALL="C" df -BM "${KERNEL_OUTPUTDIR}" | awk '$3 ~ /[0-9]+/ { print $4 }')
 		if [ -n "${available_free_disk_space}" ]
 		then
 			print_info 2 '' 1 0
@@ -1806,7 +1909,7 @@ check_disk_space_requirements() {
 }
 
 check_distfiles() {
-	local source_files=( $(compgen -A variable |grep '^GKPKG_.*SRCTAR$') )
+	local source_files=( $(compgen -A variable | grep '^GKPKG_.*_SRCTAR$') )
 
 	local -a missing_sources
 	local source_file=
@@ -1931,7 +2034,7 @@ kconfig_set_opt() {
 	else
 		print_info 3 "$(get_indent ${indentlevel}) - Setting option '${optname}' to '${optval}' in '${kconfig}'..."
 		sed -i "${kconfig}" \
-			-e "s/^#\? \?${optname}[ =].*/${optname}=${optval}/g" \
+			-e "s|^#\? \?${optname}[ =].*|${optname}=${optval}|g" \
 			|| gen_die "Failed to set '${optname}=${optval}' in '${kconfig}'"
 
 		[ ! -f "${KCONFIG_MODIFIED_MARKER}" ] && touch "${KCONFIG_MODIFIED_MARKER}"
@@ -1944,7 +2047,7 @@ make_bootdir_writable() {
 	local bootdir_status=unknown
 
 	# Based on mount-boot.eclass code
-	local fstabstate=$(awk "!/^#|^[[:blank:]]+#|^${BOOTDIR//\//\\/}/ {print \$2}" /etc/fstab 2>/dev/null | egrep "^${BOOTDIR}$" )
+	local fstabstate=$(awk "!/^#|^[[:blank:]]+#|^${BOOTDIR//\//\\/}/ {print \$2}" /etc/fstab 2>/dev/null | grep -E "^${BOOTDIR}$" )
 	local procstate=$(awk "\$2 ~ /^${BOOTDIR//\//\\/}\$/ {print \$2}" /proc/mounts 2>/dev/null)
 	local proc_ro=$(awk '{ print $2 " ," $4 "," }' /proc/mounts 2>/dev/null | sed -n "/^${BOOTDIR//\//\\/} .*,ro,/p")
 

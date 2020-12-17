@@ -1,5 +1,5 @@
 #!/bin/bash
-# Copyright 1999-2019 Gentoo Authors
+# Copyright 1999-2020 Gentoo Authors
 # Distributed under the terms of the GNU General Public License v2
 
 __module_main() {
@@ -365,7 +365,7 @@ _initialize() {
 	# https://git.dereferenced.org/pkgconf/pkgconf/issues/30
 	unset PKG_CONFIG_PATH PKG_CONFIG_DIR LIBRARY_PATH
 
-	export PKG_CONFIG_LIBDIR=\${SYSROOT}/usr/lib/pkgconfig
+	export PKG_CONFIG_LIBDIR=\${SYSROOT}/usr/lib/pkgconfig:\${SYSROOT}/usr/share/pkgconfig
 	export PKG_CONFIG_SYSROOT_DIR=\${SYSROOT}
 
 	exec pkg-config "\$@"
@@ -401,6 +401,7 @@ _src_install() {
 
 _src_prepare() {
 	# let's try to be smart and run autoreconf only when needed
+	# when no value was set in gkbuild
 	local want_autoreconf=${WANT_AUTORECONF}
 
 	# by default always run libtoolize
@@ -424,10 +425,11 @@ _src_prepare() {
 			-exec cksum {} + | sort -k2
 	}
 
-	if $(uses_autoconf) && ! isTrue "${want_autoreconf}"
+	if [ -z "${want_autoreconf}" ] && $(uses_autoconf)
 	then
 		local checksum=$(at_checksum)
 	fi
+
 	if [[ -d "${patchdir}" ]]
 	then
 		local silent="-s "
@@ -465,7 +467,7 @@ _src_prepare() {
 		print_info 2 "$(get_indent 2)${P}: >> No patches found in '$patchdir'; Skipping ..."
 	fi
 
-	if $(uses_autoconf) && ! isTrue "${want_autoreconf}"
+	if [ -z "${want_autoreconf}" ] && $(uses_autoconf)
 	then
 		if [[ ${checksum} != $(at_checksum) ]]
 		then

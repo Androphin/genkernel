@@ -37,18 +37,27 @@ then
 fi
 
 main() {
-	if [ ! -x /sbin/cryptsetup ]
+	if ! hash cryptsetup >/dev/null 2>&1
 	then
 		bad_msg "cryptsetup program is missing. Was initramfs built without --luks parameter?"
 		exit 1
 	fi
 
-	eval local LUKS_DEVICE='"${CRYPT_'${TYPE}'}"' LUKS_NAME="${NAME}" LUKS_KEY='"${CRYPT_KEYFILE_'${TYPE}'}"'
-	eval local LUKS_TRIM='"${CRYPT_'${TYPE}'_TRIM}"' OPENED_LOCKFILE='"${CRYPT_'${TYPE}'_OPENED_LOCKFILE}"'
+	local LUKS_NAME="${NAME}"
+	eval local LUKS_DEVICE='"${CRYPT_'${TYPE}'}"'
+	eval local LUKS_KEY='"${CRYPT_'${TYPE}'_KEYFILE}"'
+	eval local cryptsetup_options='"${CRYPT_'${TYPE}'_OPTIONS}"'
+	cryptsetup_options="$(trim "${cryptsetup_options}")"
+	eval local OPENED_LOCKFILE='"${CRYPT_'${TYPE}'_OPENED_LOCKFILE}"'
+
+	if [ -z "${LUKS_DEVICE}" ]
+	then
+		bad_msg "'crypt_${NAME}' kernel command-line argument is not set!"
+		exit 1
+	fi
 
 	while true
 	do
-		local cryptsetup_options=""
 		local gpg_cmd crypt_filter_ret
 
 		if [ -e "${OPENED_LOCKFILE}" ]
@@ -59,23 +68,21 @@ main() {
 			LUKS_DEVICE=$(find_real_device "${LUKS_DEVICE}")
 			if [ -z "${LUKS_DEVICE}" ]
 			then
-				bad_msg "Looks like CRYPT_${TYPE} kernel cmdline argument is not set." "${CRYPT_SILENT}"
+				bad_msg "Failed to find LUKS device. If crypt_${NAME} kernel command-line argument is correct you are probably missing kernel support for your storage!" ${CRYPT_SILENT}
 				exit 1
 			fi
 
-			setup_md_device "${LUKS_DEVICE}"
 			if ! run cryptsetup isLuks "${LUKS_DEVICE}"
 			then
-				bad_msg "The LUKS device ${LUKS_DEVICE} does not contain a LUKS header" "${CRYPT_SILENT}"
+				bad_msg "The LUKS device ${LUKS_DEVICE} does not contain a LUKS header" ${CRYPT_SILENT}
 
 				# User has SSH access and is able to call script again or
 				# able to investigate the problem on its own.
 				exit 1
 			else
-				if [ "x${LUKS_TRIM}" = "xyes" ]
+				if [ -n "${cryptsetup_options}" ]
 				then
-					good_msg "Enabling TRIM support for ${LUKS_NAME} ..." "${CRYPT_SILENT}"
-					cryptsetup_options="${cryptsetup_options} --allow-discards"
+					good_msg "Using the following cryptsetup options for ${LUKS_NAME}: ${cryptsetup_options}" ${CRYPT_SILENT}
 				fi
 
 				# Handle keys
@@ -96,10 +103,10 @@ main() {
 				if [ ${crypt_filter_ret} -eq 0 ]
 				then
 					run touch "${OPENED_LOCKFILE}"
-					good_msg "LUKS device ${LUKS_DEVICE} opened" "${CRYPT_SILENT}"
+					good_msg "LUKS device ${LUKS_DEVICE} opened" ${CRYPT_SILENT}
 					break
 				else
-					bad_msg "Failed to open LUKS device ${LUKS_DEVICE}" "${CRYPT_SILENT}"
+					bad_msg "Failed to open LUKS device ${LUKS_DEVICE}" ${CRYPT_SILENT}
 
 					# We need to stop here with a non-zero exit code to prevent
 					# a loop when invalid keyfile was sent.
@@ -108,6 +115,8 @@ main() {
 			fi
 		fi
 	done
+
+	udevsettle
 
 	if [ -s "${LUKS_KEY}" ]
 	then

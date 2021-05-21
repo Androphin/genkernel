@@ -261,10 +261,10 @@ determine_output_filenames() {
 determine_real_args() {
 	# Unset known variables which will interfere with _tc-getPROG().
 	local tc_var tc_varname_build tc_vars=$(get_tc_vars)
-	for tc_var in ${tc_vars}
+	for tc_var in ${tc_vars} BROOT
 	do
 		tc_varname_build="BUILD_${tc_var}"
-		unset tc_var ${tc_varname_build}
+		unset ${tc_var} ${tc_varname_build}
 	done
 	unset tc_var tc_varname_build tc_vars
 
@@ -279,6 +279,20 @@ determine_real_args() {
 		gen_die "'realpath -m /' failed. We need a realpath version which supports '-m' mode!"
 	fi
 
+	if hash grep &>/dev/null
+	then
+		GREP_CMD=grep
+	else
+		gen_die "grep not found. Is sys-apps/grep installed?"
+	fi
+
+	if hash zgrep &>/dev/null
+	then
+		ZGREP_CMD=zgrep
+	else
+		print_warning 1 "zgrep not found. Is app-arch/gzip installed? You will be unable to use compressed config files!"
+	fi
+
 	print_info 4 "Resolving config file, command line, and arch default settings."
 
 	#                               Dest / Config File                    Command Line                              Arch Default
@@ -286,6 +300,7 @@ determine_real_args() {
 	set_config_with_override STRING TMPDIR                                CMD_TMPDIR                                "/var/tmp/genkernel"
 	set_config_with_override STRING LOGFILE                               CMD_LOGFILE                               "/var/log/genkernel.conf"
 	set_config_with_override STRING KERNEL_DIR                            CMD_KERNEL_DIR                            "${DEFAULT_KERNEL_SOURCE}"
+	set_config_with_override STRING KERNEL_MODULES_PREFIX                 CMD_KERNEL_MODULES_PREFIX
 	set_config_with_override BOOL   KERNEL_SOURCES                        CMD_KERNEL_SOURCES                        "yes"
 	set_config_with_override STRING INITRAMFS_FILENAME                    CMD_INITRAMFS_FILENAME                    "${DEFAULT_INITRAMFS_FILENAME}"
 	set_config_with_override STRING INITRAMFS_SYMLINK_NAME                CMD_INITRAMFS_SYMLINK_NAME                "${DEFAULT_INITRAMFS_SYMLINK_NAME}"
@@ -300,18 +315,35 @@ determine_real_args() {
 
 	set_config_with_override STRING COMPRESS_INITRD                       CMD_COMPRESS_INITRD                       "${DEFAULT_COMPRESS_INITRD}"
 	set_config_with_override STRING COMPRESS_INITRD_TYPE                  CMD_COMPRESS_INITRD_TYPE                  "${DEFAULT_COMPRESS_INITRD_TYPE}"
+	set_config_with_override STRING CHOST                                 CMD_CHOST                                 "${DEFAULT_CHOST}"
 	set_config_with_override STRING MAKEOPTS                              CMD_MAKEOPTS                              "${DEFAULT_MAKEOPTS}"
 	set_config_with_override STRING NICE                                  CMD_NICE                                  "10"
-	set_config_with_override STRING KERNEL_MAKE                           CMD_KERNEL_MAKE                           "${DEFAULT_KERNEL_MAKE}"
-	set_config_with_override STRING UTILS_CFLAGS                          CMD_UTILS_CFLAGS                          "${DEFAULT_UTILS_CFLAGS}"
-	set_config_with_override STRING UTILS_MAKE                            CMD_UTILS_MAKE                            "${DEFAULT_UTILS_MAKE}"
-	set_config_with_override STRING KERNEL_CC                             CMD_KERNEL_CC                             "${DEFAULT_KERNEL_CC}"
-	set_config_with_override STRING KERNEL_LD                             CMD_KERNEL_LD                             "${DEFAULT_KERNEL_LD}"
 	set_config_with_override STRING KERNEL_AS                             CMD_KERNEL_AS                             "${DEFAULT_KERNEL_AS}"
+	set_config_with_override STRING KERNEL_AR                             CMD_KERNEL_AR                             "${DEFAULT_KERNEL_AR}"
+	set_config_with_override STRING KERNEL_CC                             CMD_KERNEL_CC                             "${DEFAULT_KERNEL_CC}"
+	set_config_with_override STRING KERNEL_CFLAGS                         CMD_KERNEL_CFLAGS                         "${DEFAULT_KERNEL_CFLAGS}"
+	set_config_with_override STRING KERNEL_CXX                            CMD_KERNEL_CXX                            "${DEFAULT_KERNEL_CXX}"
+	set_config_with_override STRING KERNEL_LD                             CMD_KERNEL_LD                             "${DEFAULT_KERNEL_LD}"
+	set_config_with_override STRING KERNEL_NM                             CMD_KERNEL_NM                             "${DEFAULT_KERNEL_NM}"
+	set_config_with_override STRING KERNEL_MAKE                           CMD_KERNEL_MAKE                           "${DEFAULT_KERNEL_MAKE}"
+	set_config_with_override STRING KERNEL_OBJCOPY                        CMD_KERNEL_OBJCOPY                        "${DEFAULT_KERNEL_OBJCOPY}"
+	set_config_with_override STRING KERNEL_OBJDUMP                        CMD_KERNEL_OBJDUMP                        "${DEFAULT_KERNEL_OBJDUMP}"
+	set_config_with_override STRING KERNEL_RANLIB                         CMD_KERNEL_RANLIB                         "${DEFAULT_KERNEL_RANLIB}"
+	set_config_with_override STRING KERNEL_READELF                        CMD_KERNEL_READELF                        "${DEFAULT_KERNEL_READELF}"
+	set_config_with_override STRING KERNEL_STRIP                          CMD_KERNEL_STRIP                          "${DEFAULT_KERNEL_STRIP}"
+	set_config_with_override STRING UTILS_AS                              CMD_UTILS_AS                              "${DEFAULT_UTILS_AS}"
+	set_config_with_override STRING UTILS_AR                              CMD_UTILS_AR                              "${DEFAULT_UTILS_AR}"
 	set_config_with_override STRING UTILS_CC                              CMD_UTILS_CC                              "${DEFAULT_UTILS_CC}"
+	set_config_with_override STRING UTILS_CFLAGS                          CMD_UTILS_CFLAGS                          "${DEFAULT_UTILS_CFLAGS}"
 	set_config_with_override STRING UTILS_CXX                             CMD_UTILS_CXX                             "${DEFAULT_UTILS_CXX}"
 	set_config_with_override STRING UTILS_LD                              CMD_UTILS_LD                              "${DEFAULT_UTILS_LD}"
-	set_config_with_override STRING UTILS_AS                              CMD_UTILS_AS                              "${DEFAULT_UTILS_AS}"
+	set_config_with_override STRING UTILS_NM                              CMD_UTILS_NM                              "${DEFAULT_UTILS_NM}"
+	set_config_with_override STRING UTILS_MAKE                            CMD_UTILS_MAKE                            "${DEFAULT_UTILS_MAKE}"
+	set_config_with_override STRING UTILS_OBJCOPY                         CMD_UTILS_OBJCOPY                         "${DEFAULT_UTILS_OBJCOPY}"
+	set_config_with_override STRING UTILS_OBJDUMP                         CMD_UTILS_OBJDUMP                         "${DEFAULT_UTILS_OBJDUMP}"
+	set_config_with_override STRING UTILS_RANLIB                          CMD_UTILS_RANLIB                          "${DEFAULT_UTILS_RANLIB}"
+	set_config_with_override STRING UTILS_READELF                         CMD_UTILS_READELF                         "${DEFAULT_UTILS_READELF}"
+	set_config_with_override STRING UTILS_STRIP                           CMD_UTILS_STRIP                           "${DEFAULT_UTILS_STRIP}"
 
 	set_config_with_override STRING CROSS_COMPILE                         CMD_CROSS_COMPILE
 	set_config_with_override STRING BOOTDIR                               CMD_BOOTDIR                               "/boot"
@@ -337,11 +369,11 @@ determine_real_args() {
 	set_config_with_override BOOL   RAMDISKMODULES                        CMD_RAMDISKMODULES                        "yes"
 	set_config_with_override BOOL   ALLRAMDISKMODULES                     CMD_ALLRAMDISKMODULES                     "no"
 	set_config_with_override STRING INITRAMFS_OVERLAY                     CMD_INITRAMFS_OVERLAY
+	set_config_with_override STRING LINUXRC                               CMD_LINUXRC
 	set_config_with_override BOOL   MOUNTBOOT                             CMD_MOUNTBOOT                             "yes"
 	set_config_with_override BOOL   BUILD_STATIC                          CMD_STATIC                                "no"
 	set_config_with_override BOOL   SAVE_CONFIG                           CMD_SAVE_CONFIG                           "yes"
 	set_config_with_override BOOL   SYMLINK                               CMD_SYMLINK                               "no"
-	set_config_with_override STRING INSTALL_MOD_PATH                      CMD_INSTALL_MOD_PATH
 	set_config_with_override BOOL   OLDCONFIG                             CMD_OLDCONFIG                             "yes"
 	set_config_with_override BOOL   SANDBOX                               CMD_SANDBOX                               "yes"
 	set_config_with_override BOOL   SSH                                   CMD_SSH                                   "no"
@@ -364,7 +396,6 @@ determine_real_args() {
 	set_config_with_override BOOL   UNIONFS                               CMD_UNIONFS                               "no"
 	set_config_with_override BOOL   NETBOOT                               CMD_NETBOOT                               "no"
 	set_config_with_override STRING REAL_ROOT                             CMD_REAL_ROOT
-	set_config_with_override BOOL   DISKLABEL                             CMD_DISKLABEL                             "yes"
 	set_config_with_override BOOL   LUKS                                  CMD_LUKS                                  "no"
 	set_config_with_override BOOL   GPG                                   CMD_GPG                                   "no"
 	set_config_with_override BOOL   MDADM                                 CMD_MDADM                                 "no"
@@ -384,7 +415,6 @@ determine_real_args() {
 	set_config_with_override BOOL   GENZIMAGE                             CMD_GENZIMAGE                             "no"
 	set_config_with_override BOOL   KEYMAP                                CMD_KEYMAP                                "yes"
 	set_config_with_override BOOL   DOKEYMAPAUTO                          CMD_DOKEYMAPAUTO                          "no"
-	set_config_with_override STRING BUSYBOX_CONFIG                        CMD_BUSYBOX_CONFIG
 	set_config_with_override STRING STRIP_TYPE                            CMD_STRIP_TYPE                            "modules"
 	set_config_with_override BOOL   INSTALL                               CMD_INSTALL                               "yes"
 	set_config_with_override BOOL   CLEANUP                               CMD_CLEANUP                               "yes"
@@ -479,6 +509,8 @@ determine_real_args() {
 
 	declare -gr KCONFIG_MODIFIED_MARKER="${TEMP}/.kconfig_modified"
 
+	declare -gr KCONFIG_REQUIRED_OPTIONS="${TEMP}/.kconfig_required_options"
+
 	if [ -n "${CMD_CROSS_COMPILE}" ]
 	then
 		if ! isTrue "$(is_valid_triplet "${CMD_CROSS_COMPILE}")"
@@ -561,17 +593,15 @@ determine_real_args() {
 	ARCH_CONFIG="${GK_SHARE}/arch/${ARCH}/config.sh"
 	[ -f "${ARCH_CONFIG}" ] || gen_die "${ARCH} not yet supported by genkernel. Please add the arch-specific config file '${ARCH_CONFIG}'!"
 
-	# set CBUILD and CHOST
-	local build_cc=$(tc-getBUILD_CC)
-	CBUILD=$(${build_cc} -dumpmachine 2>/dev/null)
-	if [ -z "${CBUILD}" ]
+	# Set CBUILD and CHOST
+	if ! isTrue "$(is_valid_triplet "${CHOST}")"
 	then
-		gen_die "Failed to determine CBUILD using '${build_cc} -dumpmachine' command!"
+		gen_die "Set CHOST '${CHOST}' does NOT represent a valid triplet!"
 	else
+		# Initialize CBUILD with CHOST value
+		CBUILD=${CHOST}
 		print_info 5 "CBUILD set to '${CBUILD}' ..."
-		CHOST="${CBUILD}"
 	fi
-	unset build_cc
 
 	if [ -n "${CMD_CROSS_COMPILE}" ]
 	then
@@ -591,8 +621,8 @@ determine_real_args() {
 	vars_to_initialize+=( "BUSYBOX_CONFIG" )
 	vars_to_initialize+=( "DEFAULT_KERNEL_CONFIG" )
 
-	local binpkgs=( $(compgen -A variable |grep '^GKPKG_.*BINPKG$') )
-	local binpkg=
+	local binpkgs=( $(compgen -A variable | grep '^GKPKG_.*_BINPKG$') )
+	local binpkg
 	for binpkg in "${binpkgs[@]}"
 	do
 		pkg_prefixes+=( "${binpkg%_BINPKG}" )
@@ -608,7 +638,7 @@ determine_real_args() {
 	done
 	unset v vars_to_initialize
 
-	declare -gA GKPKG_LOOKUP_TABLE=
+	declare -gA GKPKG_LOOKUP_TABLE=()
 	local pn_varname= pn=
 	for v in "${pkg_prefixes[@]}"
 	do
@@ -618,6 +648,73 @@ determine_real_args() {
 		GKPKG_LOOKUP_TABLE[${pn}]=${v}
 	done
 	unset v pn pn_varname pkg_prefixes
+
+	declare -gA GKICM_LOOKUP_TABLE_CMD=()
+	declare -gA GKICM_LOOKUP_TABLE_EXT=()
+	declare -gA GKICM_LOOKUP_TABLE_PKG=()
+	local known_initramfs_compression_methods_by_compression=( $(get_initramfs_compression_method_by_compression) )
+	local known_initramfs_compression_methods_by_speed=( $(get_initramfs_compression_method_by_speed) )
+	local initramfs_compression_methods=( $(compgen -A variable | grep '^GKICM_.*_KOPTNAME$') )
+	local initramfs_compression_method key var_name var_prefix
+	for initramfs_compression_method in "${initramfs_compression_methods[@]}"
+	do
+		if [ -z "${!initramfs_compression_method}" ]
+		then
+			gen_die "Invalid config found: Check value of '${initramfs_compression_method}'!"
+		fi
+
+		if [[ "${known_initramfs_compression_methods_by_compression[@]} " != *"${!initramfs_compression_method}"* ]]
+		then
+			gen_die "Internal error: Initramfs compression method '${!initramfs_compression_method}' was not added to get_initramfs_compression_method_by_compression()!"
+		else
+			known_initramfs_compression_methods_by_compression=( $(printf '%s\n' "${known_initramfs_compression_methods_by_compression[@]//${!initramfs_compression_method}/}") )
+		fi
+
+		if [[ "${known_initramfs_compression_methods_by_speed[@]} " != *"${!initramfs_compression_method}"* ]]
+		then
+			gen_die "Internal error: Initramfs compression method '${!initramfs_compression_method}' was not added to get_initramfs_compression_method_by_speed()!"
+		else
+			known_initramfs_compression_methods_by_speed=( $(printf '%s\n' "${known_initramfs_compression_methods_by_speed[@]//${!initramfs_compression_method}/}") )
+		fi
+
+		var_prefix="${initramfs_compression_method%_KOPTNAME}"
+
+		for key in CMD EXT PKG
+		do
+			var_name="${var_prefix}_${key}"
+			if [ -z "${!var_name}" ]
+			then
+				gen_die "Internal error: Variable '${var_name}' is not set!"
+			fi
+
+			case ${key} in
+				CMD)
+					GKICM_LOOKUP_TABLE_CMD[${!initramfs_compression_method}]="${!var_name}"
+					;;
+				EXT)
+					GKICM_LOOKUP_TABLE_EXT[${!initramfs_compression_method}]="${!var_name}"
+					;;
+				PKG)
+					GKICM_LOOKUP_TABLE_PKG[${!initramfs_compression_method}]="${!var_name}"
+					;;
+			esac
+		done
+	done
+	unset initramfs_compression_methods initramfs_compression_method key var_name var_prefix
+
+	# It is enough to check just one data set because we validated
+	# both data sets above.
+	if [[ ${#known_initramfs_compression_methods_by_compression[@]} -gt 0 ]]
+	then
+		local unhandled_method
+		for unhandled_method in "${known_initramfs_compression_methods_by_compression[@]}"
+		do
+			print_error 1 "Do not know how to handle initramfs compression type '${unhandled_method}'!"
+		done
+
+		gen_die "Internal error: Not all known initramfs compression methods are defined!"
+	fi
+	unset known_initramfs_compression_methods_by_compression known_initramfs_compression_methods_by_speed
 
 	if [ -n "${CMD_BOOTLOADER}" ]
 	then
@@ -807,6 +904,21 @@ determine_real_args() {
 			elif [[ "${MODULEREBUILD_CMD}" == *[\$\&\|\>\(\)]* ]]
 			then
 				gen_die "--module-rebuild-cmd '${MODULEREBUILD_CMD}' contains at least one of the following disallowed characters: '\$&|>()'!"
+			fi
+		fi
+
+		if isTrue "${SAVE_CONFIG}"
+		then
+			local kconf_savedir=/etc/kernels
+			if [ ! -d "${kconf_savedir}" ]
+			then
+				kconf_savedir=/etc
+				[ ! -d "${kconf_savedir}" ] && kconf_savedir=/
+			fi
+
+			if [ ! -w "${kconf_savedir}" ]
+			then
+				gen_die "Cannot write to '${kconf_savedir}' but --save-config is set!"
 			fi
 		fi
 	fi
@@ -1009,6 +1121,30 @@ determine_real_args() {
 			gen_die "'\"${LDDTREE_COMMAND}\" -l \"${CPIO_COMMAND}\"' failed -- cannot generate initramfs without working lddtree!"
 		fi
 
+		if isTrue "${COMPRESS_INITRD}"
+		then
+			local pattern_auto='^(BEST|FASTEST)$'
+			local pattern_manual="$(get_initramfs_compression_method_by_speed)"
+			pattern_manual=${pattern_manual// /|}
+			pattern_manual="^(${pattern_manual})$"
+
+			if [[ "${COMPRESS_INITRD_TYPE^^}" =~ ${pattern_auto} ]]
+			then
+				# Will be handled in set_initramfs_compression_method()
+				:;
+			elif [[ ! "${COMPRESS_INITRD_TYPE^^}" =~ ${pattern_manual} ]]
+			then
+				gen_die "Specified --compress-initramfs-type '${COMPRESS_INITRD_TYPE}' is unknown"
+			elif ! hash ${GKICM_LOOKUP_TABLE_CMD[${COMPRESS_INITRD_TYPE^^}]/%\ */} &>/dev/null
+			then
+				gen_die "'${GKICM_LOOKUP_TABLE_CMD[${COMPRESS_INITRD_TYPE^^}]/%\ */}', the tool to compress initramfs based on selected --compress-initramfs-type was not found. Is ${GKICM_LOOKUP_TABLE_PKG[${COMPRESS_INITRD_TYPE^^}]} installed?"
+			fi
+			unset pattern_auto pattern_manual
+
+			# Ensure that value matches keys in GKICM_* arrays
+			COMPRESS_INITRD_TYPE=${COMPRESS_INITRD_TYPE^^}
+		fi
+
 		SANDBOX_COMMAND=
 		if isTrue "${SANDBOX}"
 		then
@@ -1024,6 +1160,18 @@ determine_real_args() {
 			fi
 		fi
 
+		if [ -n "${LINUXRC}" ]
+		then
+			LINUXRC=$(expand_file "${CMD_LINUXRC}" 2>/dev/null)
+			if [ -z "${LINUXRC}" ]
+			then
+				gen_die "--linuxrc value '${CMD_LINUXRC}' failed to expand!"
+			elif [ ! -e "${LINUXRC}" ]
+			then
+				gen_die "--linuxrc file '${LINUXRC}' does not exist!"
+			fi
+		fi
+
 		need_tar=yes
 	fi
 
@@ -1033,6 +1181,39 @@ determine_real_args() {
 		if [ -z "${TAR_COMMAND}" ]
 		then
 			gen_die "tar not found. Is app-arch/tar installed?"
+		fi
+	fi
+
+	if isTrue "${INTEGRATED_INITRAMFS}"
+	then
+		if  ! isTrue "${BUILD_KERNEL}" || ! isTrue "${BUILD_RAMDISK}"
+		then
+			gen_die "Invalid action specified: --integrated-initramfs option requires action \"all\", i.e. building of kernel and initramfs at the same time!"
+		fi
+	fi
+
+	if ! isTrue "${CMD_INSTALL}"
+	then
+		if [ -n "${KERNEL_MODULES_PREFIX}" ]
+		then
+			print_warning 1 '--no-install is set; Ignoring --kernel-modules-prefix ...'
+		fi
+
+		# User does not want that anything will get installed
+		# so install modules into our temporary directory instead.
+		KERNEL_MODULES_PREFIX="${TEMP}/mod_prefix"
+	elif [ -n "${KERNEL_MODULES_PREFIX}" ]
+	then
+		KERNEL_MODULES_PREFIX=$(expand_file "${CMD_KERNEL_MODULES_PREFIX}")
+		if [ -z "${KERNEL_MODULES_PREFIX}" ]
+		then
+			gen_die "Failed to expand set --kernel-modules-prefix '${CMD_KERNEL_MODULES_PREFIX}'!"
+		fi
+
+		if [ ! -d "${KERNEL_MODULES_PREFIX}" ]
+		then
+			print_warning 3 "Set --kernel-modules-prefix '${KERNEL_MODULES_PREFIX}' does not exist; Will try to create ..."
+			mkdir -p "${KERNEL_MODULES_PREFIX}" || gen_die "Failed to create '${KERNEL_MODULES_PREFIX}'!"
 		fi
 	fi
 
@@ -1059,10 +1240,14 @@ determine_real_args() {
 
 	if isTrue "${FIRMWARE}"
 	then
-		for ff in ${FIRMWARE_FILES}; do
-			[[ ${ff} = /* ]] && gen_die "FIRMWARE_FILES should list paths relative to FIRMWARE_DIR, not absolute."
+		IFS=',' read -r -a FIRMWARE_FILES <<< "${FIRMWARE_FILES}"
+		pushd "${FIRMWARE_DIR}" &>/dev/null || gen_die "Failed to chdir to '${FIRMWARE_DIR}'!"
+		local ff
+		for ff in "${FIRMWARE_FILES[@]}"
+		do
+			[[ ${ff} = /* ]] && gen_die "--firmware-files contains value '${ff}' which is not a relative path from '${FIRMWARE_DIR}'!"
+			[[ ! -e "${ff}" ]] && gen_die "--firmware-files contains value '${ff}' which was not found in '${FIRMWARE_DIR}'!"
 		done
-
-		[[ "${FIRMWARE_FILES}" = *,* ]] && gen_die "FIRMWARE_FILES should be a space-separated list."
+		popd &>/dev/null || gen_die "Failed to chdir!"
 	fi
 }

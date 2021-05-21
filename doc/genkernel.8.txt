@@ -198,8 +198,8 @@ specified.
 *--*[*no-*]*module-rebuild*::
     Runs, or does not run "emerge --ignore-default-opts --buildpkg=n --usepkg=n --quiet-build=y @module-rebuild"
     to build out-of-tree modules when possible, i.e. when non-static
-    kernel and modules will be build, installed, no custom
-    'INSTALL_MOD_PATH' is set, '/var/lib/module-rebuild/moduledb' exists
+    kernel and modules will be build, installed,
+    *--kernel-modules-prefix* is not set, '/var/lib/module-rebuild/moduledb' exists
     and is not empty.
 
 NOTE: Command can be customized using '--module-rebuild-cmd' command-line
@@ -231,7 +231,7 @@ KERNEL LOCATIONS
     Use the special value 'default' to force usage of default kernel
     config.
 
-*--module-prefix*=<dir>::
+*--kernel-modules-prefix*=<dir>::
     Prefix to kernel module destination, modules will be installed in
     '<prefix>/lib/modules'.
 
@@ -416,10 +416,6 @@ system is able to load multiple initramfs.
 *--genzimage*::
     Make and install kernelz image from 'arch/powerpc/boot/zImage.initrd'.
 
-*--*[*no-*]*disklabel*::
-    Includes or excludes disk label and uuid support in your initramfs.
-    When enabled, this will compile util-linux for you.
-
 *--*[*no-*]*luks*::
     Includes or excludes LUKS support.
     When enabled, this will compile cryptsetup for you.
@@ -575,8 +571,8 @@ NOTE: System.map filename and System.map symlink name must be different.
     Specify directory to copy firmware from (defaults to '/lib/firmware').
 
 *--firmware-files*=<files>::
-    Specifies specific firmware files to copy. This overrides *--firmware-dir*.
-    For multiple files, separate the filenames with a comma.
+    Specifies specific firmware files or directories to copy, relative to
+    *--firmware-dir*. For multiple files, separate the filenames with a comma.
 
 *--*[*no-*]*firmware-install*::
     Enable or disables installation of firmware onto root filesystem.
@@ -598,9 +594,14 @@ NOTE: System.map filename and System.map symlink name must be different.
     Deprecated alias for *--*[*no-*]*compress-initramfs*.
 
 *--compress-initramfs-type*=<arg>::
-    Compression type for initramfs (best, xz, lzma, bzip2, gzip, lzop, lz4).
-    "Best" causes selection of the best available algorithm that is selected
-    in your kernel configuration.
+    Compression type for initramfs (best, bzip2, fastest, gzip, lz4, lzma,
+    lza, xz, zstd).
++
+*best* will select the algorithm providing best compression
+from those selected in your kernel configuration.
++
+*fastest* will select the algorithm providing fastest decompression
+from those selected in your kernel configuration.
 
 *--strip*=<all|kernel|modules|none>::
     Strip debug symbols from none, all, installed kernel (obsolete) or
@@ -632,8 +633,18 @@ recognized by the kernel itself.
     This specifies the device encrypted by LUKS, which contains the
     root filesystem to mount.
 
+*crypt_root_options*=<...>::
+    This specifies additional options, which should get passed to
+    cryptsetup when opening root volume. Can be specified multiple
+    times or separate multiple options with a comma.
+
 *crypt_swap*=<...>::
     This specifies the swap device encrypted by LUKS.
+
+*crypt_swap_options*=<...>::
+    This specifies additional options, which should get passed to
+    cryptsetup when opening swap volume. Can be specified multiple
+    times or separate multiple options with a comma.
 
 *root_key*=<...>::
     In case your root is encrypted with a key, you can use a device
@@ -645,6 +656,7 @@ recognized by the kernel itself.
     root_key.   If unset while using root_key, it will automatically
     look for the device in every boot.
 
+<<<<<<< HEAD
 *root_header*=<...>::
     In case your root is encrypted with a detached LUKS header,
     you can use a device like a usb pen to store the header.
@@ -654,6 +666,10 @@ recognized by the kernel itself.
     If necessary provide the name of the device that carries the
     detached header. If unset while using root_header, it will
     automatically look for the device in every boot.
+=======
+*root_keydev_fstype*=<...>::
+    Used filesystem for *root_keydev*. See *rootfstype* for more details.
+>>>>>>> cdaef312247a3ed18c9fdcea084058e5f25a7f3e
 
 *root_trim*=(yes|no)::
     Enables TRIM support for a LUKS-based root device.  Only useful
@@ -665,6 +681,9 @@ recognized by the kernel itself.
 
 *swap_keydev*=<...>::
     Same as root_keydev for swap.
+
+*swap_keydev_fstype*=<...>::
+    Used filesystem for *swap_keydev*. See *rootfstype* for more details.
 
 *crypt_silent*::
     Set this to silent all the output related to the cryptographic
@@ -730,6 +749,20 @@ recognized by the kernel itself.
 *gk.net.timeout.interface*=<...>::
     By default we will wait up to 10 seconds for interface to show up.
 
+*gk.udev.debug*=<...>::
+    This boolean option allows you to run udevd in debug mode. Output
+    will be logged to '/run/initramfs/udevd.log'.
+
+*gk.udev.timeout*=<...>::
+    By default we will wait up to 120 seconds (UDEV default) for
+    UDEV event queue to become empty.
+
+*gk.preserverun.disabled*=<...>::
+    By default, *switch_root* will preserve and move already mounted '/run'
+    to *newroot*. This boolean option allows you to disable preserving of
+    '/run', which is maybe required for SELinux due to missing labeling
+    support in genkernel.
+
 *gk.prompt.timeout*=<...>::
 By default a prompt within genkernel initramfs like shown when set
 *root* could not be found will never timeout. Use this option to set
@@ -759,19 +792,12 @@ when not set. This will allow remote user to provide answer through
 *dolvm*::
     Activate LVM volumes on bootup.
 
-*lvmraid*=<...>::
-    Specify RAID devices to set up before the activation of LVM volumes.
-    Implies option *dolvm*.
-
 *domdadm*::
     Scan for RAID arrays on bootup.
 
 *dozfs*[=cache,force]::
     Scan for bootable ZFS pools on bootup. Optionally use cachefile or force import if
     necessary or perform both actions.
-
-*dobtrfs*::
-    Scan for attached Btrfs devices on bootup.
 
 *domultipath*::
     Activate Multipath on bootup.
@@ -791,7 +817,8 @@ when not set. This will allow remote user to provide answer through
 *rootfstype*=<...>::
     Specify the file system type to mount the real root filesystem as.
     This can be useful when support for ext2/ext3/ext4 are
-    in competition.  Default is "auto".
+    in competition or used filesystem was not built into kernel.
+    Default is "auto".
 
 *docache*::
 *nocache*::
@@ -817,6 +844,12 @@ when not set. This will allow remote user to provide answer through
     will load that font. This boolean option allows you to disable
     loading of the user embedded bootfont.
 
+*gk.emergency*=<reboot|poweroff|halt>::
+    By default, genkernel tries to spawn a rescue shell in case of
+    a critical failure (see *gk.userinteraction.disabled* to prevent this).
+    This option controls the action to execute when rescue is not possible.
+    Default is "halt".
+
 *gk.hw.load-all*=<...>::
     By default, genkernel loads various module groups (nvme, sata,
     scsi, pata, usb...) until block device specified in *root* parameter
@@ -824,40 +857,38 @@ when not set. This will allow remote user to provide answer through
     loading of all module groups regardless whether root device is
     already available.
 
+*gk.hw.use-modules_load*=<...>::
+    By default, genkernel relies on UDEV's capability to load required
+    kernel modules. This boolean option allows you to force old module
+    loading depending on modules_load file until *root* device becomes
+    available.
+
 *gk.log.disabled*=<...>::
     By default, any shown message and external command calls will be logged
-    to '/tmp/init.log' in initramfs. This boolean option allows you to
+    to '/run/initramfs/init.log'. This boolean option allows you to
     disable logging for some reason.
 
-*gk.log.keep*=<...>::
-When set to a boolean value, genkernel will preserve '/tmp/init.log',
-see above, and copy file to '/genkernel-boot.log' on *root* device.
-You can also set your own file like '/root/my-genkernel-boot.log' to
-copy log to a custom path.
+*gk.userinteraction.disabled*=<...>::
+By default, genkernel will prompt on errors. In case this is not wanted
+or desired, e.g. for a kiosk system, this boolean option will disable
+any prompting, including the rescue shell.
 
-NOTE: The default file '/genkernel-boot.log' on *root* was chosen because
-genkernel's initramfs will only mount root filesystem by default. If you
-want to store the log file in '/var/log/genkernel-boot.log' for example
-make sure that this mountpoint is accessible, see *initramfs.mounts*.
+NOTE: Because no user interaction is possible when this option is set,
+on error, system will immediately execute *gk.emergency* action.
 
 *noload*=<...>::
-    List of modules to skip loading.
-    Separate using commas or spaces.
+List of modules to skip loading.
+Separate using commas or spaces.
 
-*nodetect*::
-    Skipping scanning modules using "modprobe <MODULE> -n".
-    Use *doload=* for specifying a whitelist of exceptions.
+NOTE: This option has only an effect when *gk.hw.use-modules_load* is
+enabled.
 
 *doload*=<...>::
-    List of modules to load despite *nodetect*.
+    List of modules which should always be loaded.
 
 *domodules*::
 *nomodules*::
     Enables/disables loading of modules in general.
-
-*CONSOLE*=<...>::
-*console*=<...>::
-    Override location of console, default is "/dev/console".
 
 *part*[=<0,1>]::
 *partitionable*::

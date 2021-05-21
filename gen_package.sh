@@ -89,14 +89,14 @@ gen_minkernpackage() {
 }
 
 gen_modulespackage() {
-	if [ -d "${INSTALL_MOD_PATH}/lib/modules/${KV}" ]
+	if [ -d "${KERNEL_MODULES_PREFIX%/}/lib/modules/${KV}" ]
 	then
 		print_info 1 "modulespkg: >> Creating modules package in '${MODULESPACKAGE}' ..."
 		rm -rf "${TEMP}/modulespackage" >/dev/null 2>&1
 		mkdir "${TEMP}/modulespackage" || gen_die "Failed to create '${TEMP}/modulespackage'!"
 
 		mkdir -p "${TEMP}/modulespackage/lib/modules" || gen_die "Failed to create '${TEMP}/modulespackage/lib/modules'!"
-		cp -arP "${INSTALL_MOD_PATH}/lib/modules/${KV}" "${TEMP}/modulespackage/lib/modules"
+		cp -arP "${KERNEL_MODULES_PREFIX%/}/lib/modules/${KV}" "${TEMP}/modulespackage/lib/modules"
 
 		cd "${TEMP}/modulespackage" || gen_die "Failed to chdir to '${TEMP}/modulespackage'!"
 
@@ -106,7 +106,7 @@ gen_modulespackage() {
 		print_info 3 "COMMAND: ${tar_cmd[*]}" 1 0 1
 		eval "${tar_cmd[@]}" || gen_die "Failed to create compressed modules package '${MODULESPACKAGE}'!"
 	else
-		print_info 1 "modulespkg: >> '${INSTALL_MOD_PATH}/lib/modules/${KV}' was not found; Skipping creation of modules package in '${MODULESPACKAGE}' ..."
+		print_info 1 "modulespkg: >> '${KERNEL_MODULES_PREFIX%/}/lib/modules/${KV}' was not found; Skipping creation of modules package in '${MODULESPACKAGE}' ..."
 	fi
 }
 
@@ -165,9 +165,9 @@ gen_kerncache() {
 	mkdir -p "${TEMP}/kerncache/lib/modules/" \
 		|| gen_die "Failed to create '${TEMP}/kerncache/lib/modules'"
 
-	if [ -d "${INSTALL_MOD_PATH}/lib/modules/${KV}" ]
+	if [ -d "${KERNEL_MODULES_PREFIX%/}/lib/modules/${KV}" ]
 	then
-		cp -arP "${INSTALL_MOD_PATH}/lib/modules/${KV}" "${TEMP}/kerncache/lib/modules"
+		cp -arP "${KERNEL_MODULES_PREFIX%/}/lib/modules/${KV}" "${TEMP}/kerncache/lib/modules"
 	fi
 
 	cd "${TEMP}/kerncache" || gen_die "Failed to chdir to '${TEMP}/kerncache'!"
@@ -204,15 +204,17 @@ gen_kerncache_extract_kernel() {
 }
 
 gen_kerncache_extract_modules() {
-	print_info 1 "Extracting kerncache kernel modules from '${KERNCACHE}' ..."
-	if [ -n "${INSTALL_MOD_PATH}" ]
+	local modules_dir="${KERNEL_MODULES_PREFIX%/}/lib"
+
+	if [ ! -d "${modules_dir}" ]
 	then
-		"${TAR_COMMAND}" -xf "${KERNCACHE}" --strip-components 1 -C "${INSTALL_MOD_PATH}"/lib \
-			|| gen_die "Failed to extract kerncache modules from '${KERNCACHE}' to '${INSTALL_MOD_PATH}/lib'!"
-	else
-		"${TAR_COMMAND}" -xf "${KERNCACHE}" --strip-components 1 -C /lib \
-			|| gen_die "Failed to extract kerncache modules from '${KERNCACHE}' to '${INSTALL_MOD_PATH}/lib'!"
+		mkdir -p "${modules_dir}" ||  gen_die "Failed to create '${modules_dir}'!"
 	fi
+
+	print_info 1 "Extracting kerncache kernel modules from '${KERNCACHE}' into '${modules_dir}' ..."
+
+	"${TAR_COMMAND}" -xf "${KERNCACHE}" --strip-components 1 -C "${modules_dir}" \
+		|| gen_die "Failed to extract kerncache modules from '${KERNCACHE}' to '${modules_dir}'!"
 }
 
 gen_kerncache_extract_config() {
@@ -259,14 +261,8 @@ gen_kerncache_is_valid() {
 					local test1=$(grep -v "^#" "${TEMP}/${GK_FILENAME_TEMP_CONFIG}" | md5sum | cut -d " " -f 1)
 				fi
 
-				if isTrue "$(is_gzipped "${KERNEL_CONFIG}")"
-				then
-					# Support --kernel-config=/proc/config.gz, mainly
-					local CONFGREP=zgrep
-				else
-					local CONFGREP=grep
-				fi
-				local test2=$("${CONFGREP}" -v "^#" "${KERNEL_CONFIG}" | md5sum | cut -d " " -f 1)
+				local confgrep_cmd=$(get_grep_cmd_for_file "${KERNEL_CONFIG}")
+				local test2=$("${confgrep_cmd}" -v "^#" "${KERNEL_CONFIG}" | md5sum | cut -d " " -f 1)
 
 				if [[ "${test1}" == "${test2}" ]]
 				then

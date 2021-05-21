@@ -16,7 +16,7 @@ MODULES_WAITSCAN="scsi_wait_scan"
 MODULES_BLOCK="sdhci_acpi sdhci_pci"
 
 # Hardware (Network)
-MODULES_NET="8139cp 8139too atl1c atlantic bcm_phy_lib bnx2 bonding broadcom cxgb cxgb3 cxgb4 e1000 e1000e ena hv_netvsc ionic igb ixgb ixgbe macvlan pcnet32 r8169 realtek samsung-sxgbe sky2 tg3 tulip virtio_net vmxnet3 vxge vxlan gve"
+MODULES_NET="8139cp 8139too atl1c atlantic bcm_phy_lib bnx2 bonding broadcom cxgb cxgb3 cxgb4 e1000 e1000e ena hv_netvsc ionic igb ixgb ixgbe macvlan pcnet32 r8169 realtek samsung-sxgbe sky2 tg3 tulip virtio_net vmxnet3 vxge vxlan gve netconsole"
 
 # iSCSI support
 MODULES_ISCSI="scsi_transport_iscsi libiscsi iscsi_tcp"
@@ -24,16 +24,16 @@ MODULES_ISCSI="scsi_transport_iscsi libiscsi iscsi_tcp"
 # Hardware (Pluggable)
 MODULES_FIREWIRE="ieee1394 ohci1394 sbp2"
 MODULES_PCMCIA="pcmcia pcmcia_core yenta_socket pd6729 i82092 i82365 tcic ds ide-cs firmware_class"
-MODULES_USB="ehci-pci ehci-hcd xhci-hcd xhci-pci xhci-plat xhci-plat-hcd uhci usb-ohci hid usb-storage uas uhci-hcd ohci-hcd usbhid hid-generic sl811-hcd hid-a4tech hid-apple hid-belkin hid-cherry hid-chicony hid-cypress hid-dummy hid-ezkey hid-gyration hid-logitech hid-logitech-dj hid-microsoft hid-monterey hid-petalynx hid-pl hid-samsung hid-sony hid-sunplus"
+MODULES_USB="ehci-pci ehci-hcd xhci-hcd xhci-pci xhci-plat xhci-plat-hcd uhci usb-ohci hid usb-storage uas uhci-hcd ohci-hcd usbhid hid-generic sl811-hcd hid-a4tech hid-apple hid-belkin hid-cherry hid-chicony hid-cypress hid-dummy hid-ezkey hid-gyration hid-lenovo hid-logitech hid-logitech-dj hid-microsoft hid-monterey hid-petalynx hid-pl hid-samsung hid-sony hid-sunplus"
 
 # Filesystems
 MODULES_FS="ext2 ext3 ext4 btrfs reiserfs jfs nfs xfs zfs f2fs fuse virtiofs loop squashfs aufs overlay cramfs configfs fscrypto msdos"
 
 # Crypto
-MODULES_CRYPTO="sha256_generic cbc crc32 crc32c crc32c_generic crc32_generic aes_generic xts af_alg algif_skcipher algif_hash algif_aead algif_rng"
+MODULES_CRYPTO="sha256_generic cbc crc32 crc32c crc32c_generic crc32_generic aes_generic xts af_alg algif_skcipher algif_hash algif_aead algif_rng serpent_generic"
 
 # Hyper-V
-MODULES_HYPERV="hv_utils hv_vmbus hv_balloon hyperv_keyboard hid_hyperv hv_utils hyperv_fb hv_storvsc"
+MODULES_HYPERV="hv_sock hv_utils hv_vmbus hv_balloon hyperv-keyboard hid_hyperv hv_utils hyperv_fb hv_storvsc"
 
 # Virtio
 MODULES_VIRTIO="virtio_scsi virtio_blk virtio_console virtio-rng virtio virtio_balloon virtio_input virtio_ring virtio_pci virtio_mmio virtio_crypto"

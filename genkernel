@@ -2,7 +2,13 @@
 # $Id$
 
 PATH="${PATH}:/sbin:/usr/sbin"
-GK_V='4.0.9'
+GK_V='4.2.1'
+
+# Normalize locales
+export LC_ALL=C
+export LANG=C
+unset LC_MESSAGES
+unset LC_CTYPE
 
 GK_TIME_START=$(date +%s)
 
@@ -38,7 +44,9 @@ if [ ${#GK_SETTINGS[@]} -gt 0 ]
 then
 	GK_SETTINGS+=( CALLBACK )
 	GK_SETTINGS+=( EXTRAVERSION )
+	GK_SETTINGS+=( INSTALL_MOD_PATH )
 	GK_SETTINGS+=( MOD_INSTALL )
+	GK_SETTINGS+=( GREP_OPTIONS )
 
 	for GK_SETTING in "${GK_SETTINGS[@]}"
 	do
@@ -69,6 +77,7 @@ source "${_GENKERNEL_CONF}" || small_die "Could not read ${_GENKERNEL_CONF}"
 LOGLEVEL=${LOGLEVEL:-1}
 
 # Start sourcing other scripts
+source "${GK_SHARE}"/defaults/compression_methods.sh || small_die "Could not read '${GK_SHARE}/defaults/compression_methods.sh'"
 source "${GK_SHARE}"/defaults/software.sh || small_die "Could not read '${GK_SHARE}/defaults/software.sh'"
 source "${GK_SHARE}"/defaults/config.sh || small_die "Could not read '${GK_SHARE}/defaults/config.sh'"
 source "${GK_SHARE}"/gen_funcs.sh || small_die "Could not read '${GK_SHARE}/gen_funcs.sh'"
@@ -110,16 +119,6 @@ NORMAL=${GOOD} print_info 1 "Gentoo Linux Genkernel; Version ${GK_V}${NORMAL}"
 print_info 1 "Using genkernel configuration from '${_GENKERNEL_CONF}' ..."
 unset _GENKERNEL_CONF
 print_info 1 "Running with options: ${GK_OPTIONS}"
-
-if ! hash grep &>/dev/null
-then
-	gen_die "grep not found. Is sys-apps/grep installed?"
-fi
-
-if ! hash zgrep &>/dev/null
-then
-	print_warning 1 "zgrep not found. Is app-arch/gzip installed? You will be unable to use compressed config files!"
-fi
 
 # Save any customizations of MODULES_* first.
 override_module_vars="$(compgen -A variable |grep '^MODULES_')"
@@ -272,10 +271,15 @@ then
 	if isTrue "${SAVE_CONFIG}"
 	then
 		print_info 1 "$(get_indent 1)>> Saving config of successful build to '/etc/kernels/${GK_FILENAME_CONFIG}' ..."
-		[ ! -e '/etc/kernels' ] && mkdir -p /etc/kernels
-		cp "${KERNEL_OUTPUTDIR}/.config" "/etc/kernels/${GK_FILENAME_CONFIG}" || \
-			print_warning 1 "Unable to copy the kernel configuration file; Ignoring non-fatal error ..."
-			# Just a warning because ordinary users are not allowed to write in /etc
+
+		if [ ! -d '/etc/kernels' ]
+		then
+			mkdir -p /etc/kernels \
+				|| gen_die "Failed to create '/etc/kernels'!"
+		fi
+
+		cp -aL "${KERNEL_OUTPUTDIR}/.config" "/etc/kernels/${GK_FILENAME_CONFIG}" \
+			|| gen_die "Failed to copy kernel configuration to '/etc/kernels'!"
 	fi
 elif [[ -n "${KERNEL_LOCALVERSION}" && "${KERNEL_LOCALVERSION}" != "${LOV}" ]]
 then
@@ -299,21 +303,6 @@ then
 
 	if ! isTrue "${BUILD_STATIC}"
 	then
-		if ! isTrue "${CMD_INSTALL}" && [ -z "${INSTALL_MOD_PATH}" ]
-		then
-			# We have to set $INSTALL_MOD_PATH to avoid installing files
-			# to /lib/modules because --no-install was set
-			INSTALL_MOD_PATH="$(mktemp -d -p "${TEMP}" kerncache-modules_XXXXXXX 2>/dev/null)"
-			if [ -z "${INSTALL_MOD_PATH}" ]
-			then
-				gen_die "Internal error: Variable 'INSTALL_MOD_PATH' is empty; mktemp() for kerncache modules failed!"
-			else
-				print_info 5 '' 1 0
-				print_info 5 "INSTALL_MOD_PATH set to '${INSTALL_MOD_PATH}' because --kerncache is used but --no-install was set ..."
-				mkdir "${INSTALL_MOD_PATH}/lib" || gen_die "Failed to create '${INSTALL_MOD_PATH}/lib'!"
-			fi
-		fi
-
 		print_info 1 '' 1 0
 		gen_kerncache_extract_modules
 	fi
@@ -387,11 +376,8 @@ fi
 
 if [ -n "${KERNCACHE}" ]
 then
-	if ! isTrue "${KERNCACHE_IS_VALID}"
+	if isTrue "${BUILD_KERNEL}" && ! isTrue "${KERNCACHE_IS_VALID}"
 	then
-		# Only update KERNCACHE when KERNCACHE wasn't used because
-		# when it was used nothing has been changed so no update is
-		# necessary.
 		print_info 1 '' 1 0
 		gen_kerncache
 	else
@@ -492,8 +478,10 @@ fi
 
 if isTrue "${BUILD_RAMDISK}"
 then
+	kconfig_file_used="${KERNEL_OUTPUTDIR}/.config"
 	if ! isTrue "${BUILD_KERNEL}"
 	then
+		kconfig_file_used="${KERNEL_CONFIG}"
 		INITRAMFS_FILE="${TMPDIR}/${GK_FILENAME_TEMP_INITRAMFS}"
 		isTrue "${CMD_INSTALL}" && INITRAMFS_FILE="${BOOTDIR}/${GK_FILENAME_INITRAMFS}"
 
@@ -506,8 +494,6 @@ then
 	print_warning 1 "${BOLD}WARNING... WARNING... WARNING...${NORMAL}"
 	print_warning 1 'Additional kernel parameters that *may* be required to boot properly:'
 	isTrue "${SPLASH}"    && print_warning 1 "- Add \"vga=791 splash=silent,theme:${SPLASH_THEME} console=tty1 quiet\" if you use a splash framebuffer ]"
-	isTrue "${BCACHE}"    && print_warning 1 '- Add "dobcache" for bcache support'
-	isTrue "${BTRFS}"     && print_warning 1 '- Add "dobtrfs" for Btrfs device scanning support'
 	isTrue "${MULTIPATH}" && print_warning 1 '- Add "domultipath" for multipath support'
 	isTrue "${ISCSI}"     && print_warning 1 '- For iSCSI support, add at least:'
 	isTrue "${ISCSI}"     && print_warning 1 '	- "iscsi_initiatorname=<initiator name>"'
@@ -540,22 +526,26 @@ then
 		print_warning 1 '"man genkernel" explains "dozfs" in detail.'
 	fi
 
-	if isTrue "$(is_gzipped "${KERNEL_CONFIG}")"
-	then
-		# Support --kernel-config=/proc/config.gz, mainly
-		CONFGREP=zgrep
-	else
-		CONFGREP=grep
-	fi
-
-	if [ $(${CONFGREP} 'CONFIG_EXT[0-9]_FS=' "${KERNEL_CONFIG}" | wc -l) -ge 2 ]
+	CONFGREP_CMD=$(get_grep_cmd_for_file "${kconfig_file_used}")
+	if [ $("${CONFGREP_CMD}" 'CONFIG_EXT[0-9]_FS=' "${kconfig_file_used}" | wc -l) -ge 2 ]
 	then
 		print_warning 1 ''
 		print_warning 1 'With support for several ext* filesystems available, it may be needed to'
 		print_warning 1 'add "rootfstype=ext3" or "rootfstype=ext4" to the list of boot parameters.'
 	fi
+	unset CONFGREP_CMD
 
-	unset CONFGREP
+	cfg_CONFIG_CMDLINE_OVERRIDE=$(kconfig_get_opt "${kconfig_file_used}" CONFIG_CMDLINE_OVERRIDE)
+	if [ "${cfg_CONFIG_CMDLINE_OVERRIDE}" = "y" ]
+	then
+		cfg_CONFIG_CMDLINE=$(kconfig_get_opt "${kconfig_file_used}" CONFIG_CMDLINE)
+		print_warning 1 ''
+		print_warning 1 "${BOLD}Note:${NORMAL}"
+		print_warning 1 'You have set CONFIG_CMDLINE_OVERRIDE=y.'
+		print_warning 1 "You will be unable to alter set kernel parameters (${cfg_CONFIG_CMDLINE}) at runtime!"
+		unset cfg_CONFIG_CMDLINE
+	fi
+	unset cfg_CONFIG_CMDLINE_OVERRIDE kconfig_file_used
 fi
 
 isTrue "${CMD_INSTALL}" && restore_boot_mount_state

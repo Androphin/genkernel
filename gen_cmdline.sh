@@ -35,8 +35,6 @@ longusage() {
   echo "	--no-xconfig		Don't run xconfig after oldconfig"
   echo "	--save-config		Save the configuration to /etc/kernels"
   echo "	--no-save-config	Don't save the configuration to /etc/kernels"
-  echo "	--bcache		Enable block layer cache (bcache) support in kernel"
-  echo "	--no-bcache		Don't enable block layer cache (bcache) support in kernel"
   echo "	--hyperv		Enable Microsoft Hyper-V kernel options in kernel"
   echo "	--no-hyperv		Don't enable Microsoft Hyper-V kernel options in kernel"
   echo "	--microcode=(all|amd|intel)"
@@ -82,7 +80,8 @@ longusage() {
   echo "	--kernel-localversion=<...>"
   echo "				Set kernel CONFIG_LOCALVERSION, use special value"
   echo "				'UNSET' to unset any set LOCALVERSION"
-  echo "	--module-prefix=<dir>	Prefix to kernel module destination, modules"
+  echo "	--kernel-modules-prefix=<dir>"
+  echo "				Prefix to kernel module destination, modules"
   echo "				will be installed in <prefix>/lib/modules"
   echo "  Low-Level Compile settings"
   echo "	--cross-compile=<target-triplet>"
@@ -117,6 +116,8 @@ longusage() {
   echo "	--do-keymap-auto	Forces keymap selection at boot"
   echo "	--keymap		Enables keymap selection support"
   echo "	--no-keymap		Disables keymap selection support"
+  echo "	--bcache		Include block layer cache (bcache) support"
+  echo "	--no-bcache		Exclude block layer cache (bcache) support"
   echo "	--lvm			Include LVM support"
   echo "	--no-lvm		Exclude LVM support"
   echo "	--mdadm			Include MDADM/MDMON support"
@@ -162,8 +163,6 @@ longusage() {
   echo "	--linuxrc=<file>	Specifies a user created linuxrc"
   echo "	--busybox-config=<file>	Specifies a user created busybox config"
   echo "	--genzimage		Make and install kernelz image (PowerPC)"
-  echo "	--disklabel		Include disk label and uuid support in your initramfs"
-  echo "	--no-disklabel		Exclude disk label and uuid support in your initramfs"
   echo "	--luks			Include LUKS support"
   echo "	--no-luks		Exclude LUKS support"
   echo "	--gpg			Include GPG-armored LUKS key support"
@@ -243,7 +242,8 @@ longusage() {
   echo "	--compress-initrd	Deprecated alias for --compress-initramfs"
   echo "	--no-compress-initrd	Deprecated alias for --no-compress-initramfs"
   echo "	--compress-initramfs-type=<arg>"
-  echo "				Compression type for initramfs (best, xz, lzma, bzip2, gzip, lzop, lz4)"
+  echo "				Compression type for initramfs (best, bzip2, fastest, gzip, lz4,"
+  echo "				lzma, lza, xz, zstd)"
   echo "	--strip=(all|kernel|modules|none)"
   echo "				Strip debug symbols from none, all, installed kernel (obsolete) or"
   echo "				modules (default)"
@@ -679,9 +679,9 @@ parse_cmdline() {
 			CMD_KERNEL_LOCALVERSION="${*#*=}"
 			print_info 3 "CMD_KERNEL_LOCALVERSION: ${CMD_KERNEL_LOCALVERSION}"
 			;;
-		--module-prefix=*)
-			CMD_INSTALL_MOD_PATH="${*#*=}"
-			print_info 3 "CMD_INSTALL_MOD_PATH: ${CMD_INSTALL_MOD_PATH}"
+		--kernel-modules-prefix=*)
+			CMD_KERNEL_MODULES_PREFIX="${*#*=}"
+			print_info 3 "CMD_KERNEL_MODULES_PREFIX: ${CMD_KERNEL_MODULES_PREFIX}"
 			;;
 		--cachedir=*)
 			CACHE_DIR="${*#*=}"
@@ -758,10 +758,6 @@ parse_cmdline() {
 			print_info 3 "CMD_GENZIMAGE: ${CMD_GENZIMAGE}"
 #			ENABLE_PEGASOS_HACKS="yes"
 #			print_info 3 "ENABLE_PEGASOS_HACKS: ${ENABLE_PEGASOS_HACKS}"
-			;;
-		--disklabel|--no-disklabel)
-			CMD_DISKLABEL=$(parse_optbool "$*")
-			print_info 3 "CMD_DISKLABEL: ${CMD_DISKLABEL}"
 			;;
 		--luks|--no-luks)
 			CMD_LUKS=$(parse_optbool "$*")

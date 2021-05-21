@@ -1,0 +1,85 @@
+--- a/Makefile.in
++++ b/Makefile.in
+@@ -160,9 +160,9 @@ endif
+ 
+ TOP_DIR:=@top_srcdir@
+ TOP_BUILDDIR:=@top_builddir@
+-CFLAGS+=-g -Wall -O3 -fPIC
++CFLAGS+=-fPIC
+ CFLAGS+=@LFS_FLAGS@
+-CXXFLAGS+=-g -Wall -fPIC -fno-strict-aliasing -std=c++11
++CXXFLAGS+=-fPIC -fno-strict-aliasing -std=c++11
+ 
+ ifeq ("@DEVTOOLS@", "yes")
+ CXXFLAGS+=-DDEV_TOOLS
+@@ -363,7 +363,7 @@ LIBFT_OBJECTS=$(subst .c,.o,$(LIBFT_SOURCE))
+ 
+ lib/libft.so: $(LIBFT_OBJECTS)
+ 	@echo "    [LD]" $@
+-	$(V) gcc -shared -o $@ $+ -laio
++	$(V) $(CC) -shared -o $@ $+ -laio
+ 
+ .PHONEY: functional-test unit-test
+ 
+--- a/configure.ac
++++ b/configure.ac
+@@ -35,6 +35,8 @@ AC_LANG(C++)
+ 
+ ################################################################
+ dnl -- Checks for programs.
++AC_DEFUN([AC_PROG_AR], [AC_CHECK_TOOL([AR],[ar])])
++AC_PROG_AR
+ AC_PROG_SED
+ AC_PROG_AWK
+ AC_PROG_LN_S
+--- a/functional-tests/bcache/Makefile
++++ b/functional-tests/bcache/Makefile
+@@ -1,8 +1,8 @@
+ bcache.so: bcache.o
+-	gcc -shared -o $@ $< -laio
++	$(CC) -shared -o $@ $< -laio
+ 
+ bcache.o: bcache.c
+-	gcc -std=gnu11 -fpic -I. -Wall -c -o $@ $<
++	$(CC) -std=gnu11 -fpic -I. -Wall -c -o $@ $<
+ 
+ .PHONEY: clean
+ clean:
+--- a/functional-tests/crc32c/Makefile
++++ b/functional-tests/crc32c/Makefile
+@@ -1,8 +1,8 @@
+ crc32c.so: crc32c.o
+-	gcc -shared -o $@ $< -laio
++	$(CC) -shared -o $@ $< -laio
+ 
+ crc32c.o: crc32c.c
+-	gcc -std=gnu11 -fpic -I. -Wall -c -o $@ $<
++	$(CC) -std=gnu11 -fpic -I. -Wall -c -o $@ $<
+ 
+ .PHONEY: clean
+ clean:
+--- a/functional-tests/device-mapper/Makefile
++++ b/functional-tests/device-mapper/Makefile
+@@ -1,8 +1,8 @@
+ dm-ioctl.so: dm-ioctl.o
+-	gcc -shared -o $@ $< -laio
++	$(CC) -shared -o $@ $< -laio
+ 
+ dm-ioctl.o: dm-ioctl.c
+-	gcc -std=gnu11 -fpic -I. -Wall -c -o $@ $<
++	$(CC) -std=gnu11 -fpic -I. -Wall -c -o $@ $<
+ 
+ .PHONEY: clean
+ clean:
+--- a/unit-tests/Makefile.in
++++ b/unit-tests/Makefile.in
+@@ -25,7 +25,7 @@ GMOCK_FLAGS=\
+ 	-Wno-unused-local-typedefs
+ 
+ GMOCK_LIBS=\
+-	-Llib -lpdata -lgmock -lpthread -laio
++	-Llib -lpdata -lgmock -lpthread -laio -lgtest
+ 
+ GMOCK_DEPS=\
+ 	$(wildcard $(GMOCK_DIR)/googlemock/include/*.h) \
+ 

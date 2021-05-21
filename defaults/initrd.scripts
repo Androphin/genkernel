@@ -1051,11 +1051,7 @@ run_emergency_shell() {
 }
 
 run_shell() {
-<<<<<<< HEAD
-	if [ -f "${GK_USERINTERACTION_DISABLED_STATEFILE}" ]
-=======
 	if ! is_userinteraction_allowed
->>>>>>> cdaef312247a3ed18c9fdcea084058e5f25a7f3e
 	then
 		bad_msg "gk.userinteraction.disabled is set; Spawning a shell is disabled!"
 		return
@@ -1349,13 +1345,8 @@ prompt_user() {
 
 		if [ -f "${GK_SSHD_LOCKFILE}" ]
 		then
-<<<<<<< HEAD
-			warn_msg "The lockfile at '${GK_SSHD_LOCKFILE}' exists."
-			warn_msg "The boot process will be paused until the lock is removed."
-=======
 			warn_msg "The lockfile at '${GK_SSHD_LOCKFILE}' exists." 0
 			warn_msg "The boot process will be paused until the lock is removed." 0
->>>>>>> cdaef312247a3ed18c9fdcea084058e5f25a7f3e
 			while true
 			do
 				if [ -f "${GK_SSHD_LOCKFILE}" ]
@@ -1370,11 +1361,7 @@ prompt_user() {
 		local timeout=${GK_PROMPT_TIMEOUT}
 		[ ${timeout} -eq 0 ] && timeout=10
 
-<<<<<<< HEAD
-		warn_msg_n "System will automatically reboot in ${timeout} seconds ..."
-=======
 		warn_msg_n "System will automatically reboot in ${timeout} seconds ..." 0
->>>>>>> cdaef312247a3ed18c9fdcea084058e5f25a7f3e
 		while [ ${timeout} -gt 0 ]
 		do
 			let timeout=${timeout}-1
@@ -1858,11 +1845,6 @@ openLUKS() {
 			;;
 	esac
 
-<<<<<<< HEAD
-	eval local LUKS_DEVICE='"${CRYPT_'${TYPE}'}"' LUKS_NAME="$1" LUKS_KEY='"${CRYPT_'${TYPE}'_KEY}"'
-	eval local LUKS_KEYDEV='"${CRYPT_'${TYPE}'_KEYDEV}"' LUKS_TRIM='"${CRYPT_'${TYPE}'_TRIM}"'
-	local LUKS_HEADERDEV="${CRYPT_ROOT_HEADERDEV}" LUKS_HEADER="${CRYPT_ROOT_HEADER}"
-=======
 	local LUKS_NAME="${1}"
 	eval local LUKS_DEVICE='"${CRYPT_'${TYPE}'}"'
 	eval local LUKS_KEY='"${CRYPT_'${TYPE}'_KEY}"'
@@ -1870,7 +1852,9 @@ openLUKS() {
 	eval local LUKS_KEYDEV_FSTYPE='"${CRYPT_'${TYPE}'_KEYDEV_FSTYPE}"'
 	eval local cryptsetup_options='"${CRYPT_'${TYPE}'_OPTIONS}"'
 	cryptsetup_options="$(trim "${cryptsetup_options}")"
->>>>>>> cdaef312247a3ed18c9fdcea084058e5f25a7f3e
+	eval local LUKS_TRIM='"${CRYPT_'${TYPE}'_TRIM}"'
+	local LUKS_HEADERDEV="${CRYPT_ROOT_HEADERDEV}"
+	local LUKS_HEADER="${CRYPT_ROOT_HEADER}"
 	eval local OPENED_LOCKFILE='"${CRYPT_'${TYPE}'_OPENED_LOCKFILE}"'
 	local DEV_ERROR=0 KEY_ERROR=0 KEYDEV_ERROR=0 HEADER_ERROR=0 HEADERDEV_ERROR=0
 	local mntkey="/mnt/key/" mntheader="/mnt/luksheader/" crypt_filter_ret=
@@ -1921,8 +1905,6 @@ openLUKS() {
 				continue
 			fi
 
-<<<<<<< HEAD
-			setup_md_device ${LUKS_DEVICE}
 			local isLuks=
 			if [ -n "${LUKS_HEADER}" ]
 			then
@@ -2002,10 +1984,8 @@ openLUKS() {
 					isLuks=1
 				fi
 			else
-=======
->>>>>>> cdaef312247a3ed18c9fdcea084058e5f25a7f3e
-			if ! run cryptsetup isLuks ${LUKS_DEVICE}
-			then
+				if ! run cryptsetup isLuks ${LUKS_DEVICE}
+				then
 					isLuks=0
 				else
 					isLuks=1
